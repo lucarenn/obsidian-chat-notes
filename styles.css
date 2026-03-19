@@ -1,8 +1,127 @@
-/*
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
 
-If your plugin does not need CSS, delete this file.
+:root {
+    --msg-bg-color: #57966f;  /* var(--color-base-20);*/
+}
 
+.discord-message {
+    display: block;
+    position: relative;
+
+    padding-top: 5px;
+    padding-bottom: 10px;
+    padding-left: 22px;
+    padding-right: 22px;
+
+    margin: 10px 0;
+    border-radius: 12px;
+    max-width: 100%;
+    background-color: var(--msg-bg-color);  
+
+    border: 1px solid #ffffff3d;
+}
+
+/* Set note background to transparent (just display messages) */
+.markdown-reading-view .markdown-preview-view,
+.markdown-source-view.mod-cm6 .cm-contentContainer {
+    background-color: #00000000;
+}
+
+/* Make common embed blocks gaps in preview mode the same as in reading mode*/
+.cm-editor .embed, .cm-editor .language-pyton, .cm-editor .block-language-img-gallery {
+    margin-top: 15px !important;
+    margin-bottom: 15px !important;
+}
+
+
+.discord-content {
+    margin: 0px;
+    padding: 0px;
+    display: block;
+    /* prevents long strings cut off inside preview mode */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* prevents overflow inside codeblocks */
+.discord-content pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+
+/* ---------------- MESSAGE HEADER ----------------*/
+
+.discord-header {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    opacity: 0.7;
+}
+
+.discord-header-meta {
+    margin-left: auto;
+    font-size: 0.8em;
+    display: flex;
+    gap: 6px;
+    margin-right: 12px;
+}
+
+.discord-timestamp {
+    background-color: #2e2c30;
+    border-radius: 5px;
+    padding: 0.5px 5.5px;
+    color: #c9cbcc;
+    opacity: 0.7;
+    margin-left: 11px;
+}
+
+.discord-message-buttons {
+    display: none;
+    gap: 6px;
+}
+
+.discord-message-menu.menu-open .discord-message-buttons {
+    display: flex;
+}
+
+/* Animated Menu
+.discord-message-buttons {
+    display: flex;
+    opacity: 0;
+    gap: 6px;
+    transform: translateX(6px);
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.discord-message-menu.menu-open .discord-message-buttons {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
 */
+
+.discord-message-menu {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.discord-btn {
+    border: none;
+    background-color: var(--msg-bg-color) !important;
+    background: var(--background-modifier-hover);
+    border-radius: 4px;
+    padding: 0px 6px;
+    cursor: pointer;
+    /* box-shadow: 0px 0px 0px 0px #00000000 !important; */
+}
+
+/* Button Size */
+.discord-btn svg {
+    width: 16px;
+    height: 14px;
+}
+
