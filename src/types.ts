@@ -19,11 +19,7 @@ export type CreateMenuParams = {
 	onToggle: (menu: HTMLElement) => void;
 };
 
-export interface ChatNotesPluginSettings {
-	messageBgColor: string;
-	enableButtonShadow: boolean;
-    messageCornerRadius: number;
-}
+
 
 export class Header {
 	constructor(
