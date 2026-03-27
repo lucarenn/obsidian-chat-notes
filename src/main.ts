@@ -1,8 +1,12 @@
-import { Plugin, MarkdownRenderer, setIcon, Notice, PluginSettingTab, Setting, TFile, App, MarkdownView } from "obsidian";
+import { Plugin, MarkdownRenderer, setIcon, Notice, TFile, App, MarkdownView } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab } from "./settings"
 
+function isChatFile(app: App, file: TFile): boolean {
+	const cache = app.metadataCache.getFileCache(file);
+	return cache?.frontmatter?.type === "chat";
+}
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -12,21 +16,78 @@ export default class ChatNotesPlugin extends Plugin {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
+	private chatFileState = new Map<string, boolean>();
 
+	async refreshFile(file: TFile) {
+		
+		const leaves = this.app.workspace.getLeavesOfType("markdown");
+	
+		for (const leaf of leaves) {
+			const view = leaf.view;
+	
+			if (!(view instanceof MarkdownView)) continue;
+			if (view.file?.path !== file.path) continue;
+	
+			if (view.getMode() === "preview") {
+				view.previewMode.rerender(true);
+			} else {
+				// editor in live preview (source mode)
+				await (leaf as any).rebuildView();
+			}
+		}
+	}
+	
 	async onload() {
 
 		await this.loadSettings();
 		this.applyStyles();
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
+		document.addEventListener("click", (event) => {
+			if (!this.openMenu) return;
+			const target = event.target as HTMLElement;
+	
+			// Close only if clicking outside the open menu
+			if (!this.openMenu.contains(target)) {
+				this.openMenu.classList.remove("menu-open");
+				this.openMenu = null;
+			}
+		});
+
+
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				if (!(file instanceof TFile)) return;
+		
+				const current = isChatFile(this.app, file);
+				const prev = this.chatFileState.get(file.path);
+		
+				if (prev === current) return;
+		
+				this.chatFileState.set(file.path, current);
+		
+				// delay until UI + markdown settle
+				setTimeout(() => {
+					this.refreshFile(file);
+				}, 300); // timeout 300ms prevents error in embed link plugin.
+			})
+		);
+
+		
 		this.registerMarkdownCodeBlockProcessor(
 			"chat-message",
 			async (source, el, ctx) => {
-		  
-				// get message from file
-				const msg = Message.fromString(source);
+				
+				// check if file is a chat
+				const file = ctx.sourcePath
+				? this.app.vault.getAbstractFileByPath(ctx.sourcePath)
+				: null;
+				if (!(file instanceof TFile)) return;
 
-				// Create HTML structure for the message
+				// parse codeblock to message
+				const msg = Message.fromString(source);
+				
+				// Create HTML structure for message
 				const {wrapper, content } = createElementsHTML({
 					plugin: this,
 					ctx,
@@ -36,24 +97,36 @@ export default class ChatNotesPlugin extends Plugin {
 					onToggle: this.handleMenuToggle.bind(this)
 				});
 
+				// Only render if file has type: chat
+				const fs = this.chatFileState.get(file.path)
+				const isChatNote = fs === undefined ? isChatFile(this.app, file) : fs;
+
+				if (!isChatNote) {
+					// for now fallback render for non chat notes.
+					// TODO remove render completely and display default code block
+					const fallback = document.createElement("pre");
+					const code = document.createElement("code");
+				
+					code.addClass("language-chat-message");
+					code.textContent = source;
+				
+					fallback.appendChild(code);
+					el.appendChild(fallback);
+				
+					return;
+				}
+
 				el.appendChild(wrapper);
-
-				// TODO include in CallbacK and move to create actions?
-				document.addEventListener("click", () => {
-					if (this.openMenu) {
-						this.openMenu.classList.remove("menu-open");
-						this.openMenu = null;
-					}
-				});
-
+			
 				// Render message content as markdown
 				await MarkdownRenderer.render(
 					this.app,
 					msg.content,
 					content,
 					ctx.sourcePath,
-					this
+					this 
 				);
+
 			}
 		);
 	}
@@ -66,6 +139,7 @@ export default class ChatNotesPlugin extends Plugin {
 		const isOpening = !menu.classList.contains("menu-open");
 		menu.classList.toggle("menu-open");
 		this.openMenu = isOpening ? menu : null;
+
 	}
 
 	async loadSettings() {
