@@ -29,7 +29,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("Message background color")
-            .setDesc("Color of Message bubbles")
+            .setDesc("Determines the background color of message bubbles")
             .addColorPicker(color => {
                 color
                     .setValue(this.plugin.settings.messageBgColor)
@@ -41,7 +41,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Enable button shadow")
-		.setDesc("Toggle shadow on message buttons")
+		.setDesc("Toggle shadow on message action buttons")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.enableButtonShadow)
@@ -53,7 +53,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Message corner radius")
-		.setDesc("Determines how round the speechbubbles of the messages are")
+		.setDesc("Determines how round corners of the message bubbles are")
 		.addSlider(slider => {
 			slider
 				.setValue(this.plugin.settings.messageCornerRadius)

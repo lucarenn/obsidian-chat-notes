@@ -1,7 +1,4 @@
-import { Modal, App, MarkdownRenderer } from "obsidian";
-import { EditorView, basicSetup } from "@codemirror/basic-setup";
-import { EditorState } from "@codemirror/state";
-
+import { Modal, App } from "obsidian";
 
 export class ConfirmDeleteModal extends Modal {
     /* Pop up window to confirm the deletion of a message */

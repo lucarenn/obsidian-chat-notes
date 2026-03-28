@@ -1,4 +1,4 @@
-import { Plugin, MarkdownRenderer, setIcon, Notice, TFile, App, MarkdownView } from "obsidian";
+import { Plugin, MarkdownRenderer, setIcon, Notice, TFile, App, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab } from "./settings"
@@ -32,7 +32,11 @@ export default class ChatNotesPlugin extends Plugin {
 				view.previewMode.rerender(true);
 			} else {
 				// editor in live preview (source mode)
-				await (leaf as any).rebuildView();
+				type RebuildableLeaf = WorkspaceLeaf & {
+					rebuildView: () => Promise<void>;
+				};
+				
+				await (leaf as RebuildableLeaf).rebuildView();
 			}
 		}
 	}
@@ -44,10 +48,11 @@ export default class ChatNotesPlugin extends Plugin {
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
 		document.addEventListener("click", (event) => {
+			/* Detect clicks outside a message action menu and closes the current open menu */
+
 			if (!this.openMenu) return;
 			const target = event.target as HTMLElement;
 	
-			// Close only if clicking outside the open menu
 			if (!this.openMenu.contains(target)) {
 				this.openMenu.classList.remove("menu-open");
 				this.openMenu = null;
@@ -56,6 +61,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 
 		this.registerEvent(
+			/* Detect yaml changes and refresh/rerender the file if it becomes or is no longer a chat note */
+
 			this.app.metadataCache.on("changed", (file) => {
 				if (!(file instanceof TFile)) return;
 		
@@ -68,7 +75,7 @@ export default class ChatNotesPlugin extends Plugin {
 		
 				// delay until UI + markdown settle
 				setTimeout(() => {
-					this.refreshFile(file);
+					void this.refreshFile(file);
 				}, 300); // timeout 300ms prevents error in embed link plugin.
 			})
 		);
@@ -78,13 +85,13 @@ export default class ChatNotesPlugin extends Plugin {
 			"chat-message",
 			async (source, el, ctx) => {
 				
-				// check if file is a chat
+				// Check if file is a chat
 				const file = ctx.sourcePath
 				? this.app.vault.getAbstractFileByPath(ctx.sourcePath)
 				: null;
 				if (!(file instanceof TFile)) return;
 
-				// parse codeblock to message
+				// Parse codeblock to message
 				const msg = Message.fromString(source);
 				
 				// Create HTML structure for message
@@ -100,10 +107,10 @@ export default class ChatNotesPlugin extends Plugin {
 				// Only render if file has type: chat
 				const fs = this.chatFileState.get(file.path)
 				const isChatNote = fs === undefined ? isChatFile(this.app, file) : fs;
-
 				if (!isChatNote) {
 					// for now fallback render for non chat notes.
 					// TODO remove render completely and display default code block
+
 					const fallback = document.createElement("pre");
 					const code = document.createElement("code");
 				
@@ -112,7 +119,7 @@ export default class ChatNotesPlugin extends Plugin {
 				
 					fallback.appendChild(code);
 					el.appendChild(fallback);
-				
+
 					return;
 				}
 
@@ -124,6 +131,7 @@ export default class ChatNotesPlugin extends Plugin {
 					msg.content,
 					content,
 					ctx.sourcePath,
+					// eslint-disable-next-line obsidianmd/no-plugin-as-component
 					this 
 				);
 
@@ -143,10 +151,16 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<ChatNotesPluginSettings> ?? {};
+		
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...data,
+		};
+	
 		this.applyStyles();
 	}
-	
+
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.applyStyles();
@@ -253,161 +267,181 @@ function createMessageActionsMenu({
 
 
     /* ---------------- COPY ---------------- */
-    copyBtn.addEventListener("click", async () => {
-		const msg = Message.fromString(source);
-        await navigator.clipboard.writeText(msg.content);
-		new Notice("Copied Message");
+    copyBtn.addEventListener("click", () => {
+		
+		void (async () => {
+			const msg = Message.fromString(source);
+			await navigator.clipboard.writeText(msg.content);
+			new Notice("Copied message");
+		})();
+
     });
 
 
     /* ---------------- DELETE ---------------- */
-	deleteBtn.addEventListener("click", async (e) => {
-		e.stopPropagation();
-	
-		new ConfirmDeleteModal(app, async () => {
-	
-			const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+	deleteBtn.addEventListener("click", (e) => {
 
-			const file = app.vault.getAbstractFileByPath(filePath);
-			if (!file) return;
-			if (!(file instanceof TFile)) return;
+		void (async () => {
 
-			const section = ctx.getSectionInfo(wrapper);
-			if (!section) return;
+			e.stopPropagation();
 	
-			let content = await app.vault.read(file);
-			const lines = content.split("\n");
-	
-			lines.splice(
-				section.lineStart,
-				section.lineEnd - section.lineStart + 1
-			);
-	
-			if (editor){
-				editor.setValue(lines.join("\n"));
-			} else {
-				await app.vault.modify(file, lines.join("\n"));
-			}
-	
-			new Notice("Deleted Message");
-	
-		}).open();
+			new ConfirmDeleteModal(app, () => {
+
+				void (async () => {
+					const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+		
+					const file = app.vault.getAbstractFileByPath(filePath);
+					if (!file) return;
+					if (!(file instanceof TFile)) return;
+		
+					const section = ctx.getSectionInfo(wrapper);
+					if (!section) return;
+			
+					let content = await app.vault.read(file);
+					const lines = content.split("\n");
+			
+					lines.splice(
+						section.lineStart,
+						section.lineEnd - section.lineStart + 1
+					);
+			
+					if (editor){
+						editor.setValue(lines.join("\n"));
+					} else {
+						await app.vault.modify(file, lines.join("\n"));
+					}
+			
+					new Notice("Deleted message");
+				})();
+
+			}).open();
+		})();
+
 	});
 
 	/* ---------------- EDIT ---------------- */
-	editBtn.addEventListener("click", async (e) => {
-		e.stopPropagation();
-	
-		const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+	editBtn.addEventListener("click", (e) => {
 
-		const file = app.vault.getAbstractFileByPath(filePath);
-		if (!file) return;
-		if (!(file instanceof TFile)) return;
-
-		const section = ctx.getSectionInfo(wrapper);
-		if (!section) return;
-	
-		/* ---------------- GET CURRENT MESSAGE ---------------- */
-		let fileContent = await app.vault.read(file);
-		const lines = fileContent.split("\n");
-
-		const blockLines = lines.slice(
-			section.lineStart,
-			section.lineEnd + 1
-		);
-
-		// --- validate wrapper ---
-		if (blockLines[0] !== "````chat-message") {
-			throw new Error("Missing opening ````chat-message");
-		}
-		if (blockLines[blockLines.length - 1] !== "````") {
-			throw new Error("Missing closing ````");
-		}
-
-		// remove wrapper, create Message
-		const inner = blockLines.slice(1, -1).join("\n");
-		const msg = Message.fromString(inner);
-	
-		/* ---------------- CREATE EDITOR ---------------- */
-		const textarea = document.createElement("textarea");
-		textarea.className = "msg-inline-editor";
-		textarea.value = msg.content;
-
-		textarea.style.height = "auto";
-		textarea.style.height = textarea.scrollHeight + "px";
-
-		const saveBtn = document.createElement("button");
-		saveBtn.textContent = "Save";
-		saveBtn.className = "msg-btn msg-editor-save-btn";
-	
-		const cancelBtn = document.createElement("button");
-		cancelBtn.textContent = "Cancel";
-		cancelBtn.className = "msg-btn msg-editor-cancel-btn";
-	
-		const btnRow = document.createElement("div");
-		btnRow.className = "msg-editor-buttons";
-		btnRow.append(saveBtn, cancelBtn);
-
-		const editorWrapper = document.createElement("div");
-		editorWrapper.className = "msg-editor-wrapper";
-		editorWrapper.append(textarea, btnRow)
-	
-		/* ---------------- SWITCH UI ---------------- */
-		const originalContent = content.cloneNode(true);
-		content.empty();
-		content.appendChild(editorWrapper);
-		textarea.focus();
-
-		/* Auto resize the editor depending of the amount of content*/
-		const autoResize = () => {
-			textarea.style.height = "auto";
-			textarea.style.height = textarea.scrollHeight + "px";
-		};
-		textarea.addEventListener("input", autoResize);
-		autoResize();
-	
-		/* ---------------- CANCEL ---------------- */
-		cancelBtn.addEventListener("click", () => {
-			content.empty();
-			content.appendChild(originalContent);
-		});
-	
-		/* ---------------- SAVE ---------------- */
-		saveBtn.addEventListener("click", async () => {
-
-			const newContent = textarea.value
-			const newMarkdown = msg.setContent(newContent).toString();
-
-			lines.splice(
-				section.lineStart,
-				section.lineEnd - section.lineStart + 1,
-				newMarkdown
-			);
+		void (async () => {
+				e.stopPropagation();
 			
-			if (editor){
-				editor.setValue(lines.join("\n"));
-			} else {
-				await app.vault.modify(file, lines.join("\n"));
-			}
+				const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 
-			// instant UI update
-			content.empty();
-			await MarkdownRenderer.render(
-				app,
-				newContent,
-				content,
-				filePath,
-				plugin
-			);
+				const file = app.vault.getAbstractFileByPath(filePath);
+				if (!file) return;
+				if (!(file instanceof TFile)) return;
+
+				const section = ctx.getSectionInfo(wrapper);
+				if (!section) return;
+			
+				// Get current Message
+				let fileContent = await app.vault.read(file);
+				const lines = fileContent.split("\n");
+
+				const blockLines = lines.slice(
+					section.lineStart,
+					section.lineEnd + 1
+				);
+
+				// Validate Wrapper
+				if (blockLines[0] !== "````chat-message") {
+					throw new Error("Missing opening ````chat-message");
+				}
+				if (blockLines[blockLines.length - 1] !== "````") {
+					throw new Error("Missing closing ````");
+				}
+
+				// Remove wrapper, create Message
+				const inner = blockLines.slice(1, -1).join("\n");
+				const msg = Message.fromString(inner);
+			
+				// Create Editor
+				const textarea = document.createElement("textarea");
+				textarea.className = "msg-inline-editor";
+				textarea.value = msg.content;
+
+				// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+				textarea.style.height = "auto";
+				textarea.style.height = textarea.scrollHeight + "px";
+
+				const saveBtn = document.createElement("button");
+				saveBtn.textContent = "Save";
+				saveBtn.className = "msg-btn msg-editor-save-btn";
+			
+				const cancelBtn = document.createElement("button");
+				cancelBtn.textContent = "Cancel";
+				cancelBtn.className = "msg-btn msg-editor-cancel-btn";
+			
+				const btnRow = document.createElement("div");
+				btnRow.className = "msg-editor-buttons";
+				btnRow.append(saveBtn, cancelBtn);
+
+				const editorWrapper = document.createElement("div");
+				editorWrapper.className = "msg-editor-wrapper";
+				editorWrapper.append(textarea, btnRow)
+			
+				// Switch UI
+				const originalContent = content.cloneNode(true);
+				content.empty();
+				content.appendChild(editorWrapper);
+				textarea.focus();
+
+				/* Auto resize the editor depending of the amount of content*/
+				const autoResize = () => {
+					// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+					textarea.style.height = "auto";
+					textarea.style.height = textarea.scrollHeight + "px";
+				};
+				textarea.addEventListener("input", autoResize);
+				autoResize();
+			
+				// Cancel Action
+				cancelBtn.addEventListener("click", () => {
+					content.empty();
+					content.appendChild(originalContent);
+				});
+			
+				// Save Action
+				saveBtn.addEventListener("click", () => {
+
+					void (async () => {
+						const newContent = textarea.value
+						const newMarkdown = msg.setContent(newContent).toString();
+
+						lines.splice(
+							section.lineStart,
+							section.lineEnd - section.lineStart + 1,
+							newMarkdown
+						);
+						
+						if (editor){
+							editor.setValue(lines.join("\n"));
+						} else {
+							await app.vault.modify(file, lines.join("\n"));
+						}
+
+						// instant UI update
+						content.empty();
+
+						await MarkdownRenderer.render(
+							app,
+							newContent,
+							content,
+							filePath,
+							// eslint-disable-next-line obsidianmd/no-plugin-as-component
+							plugin
+						);
+					})();
+
+				});
+			})();
 		});
 
-	});
-
-    return {
-        menu,
-        wrapper,
+	return {
+		menu,
+		wrapper,
 		content
-    };
+	};
 };
 
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
