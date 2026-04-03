@@ -100,7 +100,7 @@ export class Message {
 			"````chat-message",
 			this.header.toString(),
 			this.content,
-			"````",
+			"````\n",
 		].join("\n");
 	}
 }

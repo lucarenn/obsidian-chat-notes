@@ -16,10 +16,12 @@ export default class ChatNotesPlugin extends Plugin {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
+
 	private chatFileState = new Map<string, boolean>();
 
 	async refreshFile(file: TFile) {
 		
+		console.log("File refresh");
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
 	
 		for (const leaf of leaves) {
@@ -41,6 +43,17 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 	
+	scrollToBottom(view: MarkdownView) {
+		console.log("scrolled")
+		const container = view.containerEl.querySelector(".markdown-preview-view");
+		if (!container) return;
+
+		const cmScroller = view.containerEl.querySelector(".cm-scroller");
+		cmScroller?.scrollTo({ top: cmScroller.scrollHeight });
+		
+		container.scrollTop = container.scrollHeight;
+		}
+
 	async onload() {
 
 		await this.loadSettings();
@@ -59,16 +72,38 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		});
 
+		this.registerEvent(
+			/* Detect file switchesand scroll to the bottom on chat files */
+
+				this.app.workspace.on("active-leaf-change", async (leaf) => {
+					console.log("File switch")
+				if (!leaf) return;
+			
+				const view = leaf.view;
+				if (!(view instanceof MarkdownView)) return;
+			  
+				const file = view.file; // <-- active file
+				if (!file) return;
+				if (!isChatFile(this.app, file)) return;
+			
+				// Delay to ensure rendering is complete
+				setTimeout(() => {
+					this.scrollToBottom(view);
+					}, 50);
+				})
+		  );
 
 		this.registerEvent(
 			/* Detect yaml changes and refresh/rerender the file if it becomes or is no longer a chat note */
 
 			this.app.metadataCache.on("changed", (file) => {
+				
+				console.log("Yaml change detected");
 				if (!(file instanceof TFile)) return;
 		
+				// TODO always rerender if chat is true and markdown change is detected
 				const current = isChatFile(this.app, file);
 				const prev = this.chatFileState.get(file.path);
-		
 				if (prev === current) return;
 		
 				this.chatFileState.set(file.path, current);
@@ -147,7 +182,35 @@ export default class ChatNotesPlugin extends Plugin {
 		const isOpening = !menu.classList.contains("menu-open");
 		menu.classList.toggle("menu-open");
 		this.openMenu = isOpening ? menu : null;
+	}
 
+	handleOpenEditor(newEditor: {
+		container: HTMLElement;
+		restore: () => void;
+	}) {
+
+
+		// If same editor = do nothing
+		if (this.activeEditor?.container === newEditor.container) {
+			console.log("Same editor")
+			return;
+		}
+	
+		// Close previous editor
+		if (this.activeEditor) {
+			console.log("different editor")
+			
+			console.log(newEditor.container)
+			this.activeEditor.restore();
+		}
+	
+		this.activeEditor = newEditor;
+	}
+	
+	clearActiveEditor(editor: { container: HTMLElement }) {
+		if (this.activeEditor?.container === editor.container) {
+			this.activeEditor = null;
+		}
 	}
 
 	async loadSettings() {
@@ -164,7 +227,7 @@ export default class ChatNotesPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.applyStyles();
-	}
+	}		
 
 	applyStyles() {
 		document.documentElement.style.setProperty(
@@ -229,9 +292,9 @@ function createMessageActionsMenu({
 	onToggle,
 } : CreateMenuParams) {
 	
+
     const filePath = ctx.sourcePath;
 	const app = plugin.app;
-
 
 	const menu = document.createElement("div");
 	menu.className = "msg-action-menu";
@@ -268,13 +331,12 @@ function createMessageActionsMenu({
 
     /* ---------------- COPY ---------------- */
     copyBtn.addEventListener("click", () => {
-		
 		void (async () => {
 			const msg = Message.fromString(source);
 			await navigator.clipboard.writeText(msg.content);
 			new Notice("Copied message");
-		})();
 
+		})();
     });
 
 
@@ -312,11 +374,10 @@ function createMessageActionsMenu({
 					}
 			
 					new Notice("Deleted message");
-				})();
 
+				})();
 			}).open();
 		})();
-
 	});
 
 	/* ---------------- EDIT ---------------- */
@@ -324,7 +385,13 @@ function createMessageActionsMenu({
 
 		void (async () => {
 				e.stopPropagation();
-			
+
+				// return if this editor is currently already open
+				if (plugin.activeEditor?.container === content.firstChild) {
+					console.log("editor is already open")
+					return;
+				}
+				
 				const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 
 				const file = app.vault.getAbstractFileByPath(filePath);
@@ -380,6 +447,20 @@ function createMessageActionsMenu({
 				editorWrapper.className = "msg-editor-wrapper";
 				editorWrapper.append(textarea, btnRow)
 			
+
+				// Cancel editor changes
+				const restore = () => {
+					content.empty();
+					content.appendChild(originalContent);
+					plugin.clearActiveEditor({ container: editorWrapper });
+				};
+
+				// Cancel current editor first
+				plugin.handleOpenEditor({
+					container: editorWrapper,
+					restore
+				});
+	
 				// Switch UI
 				const originalContent = content.cloneNode(true);
 				content.empty();
@@ -397,8 +478,7 @@ function createMessageActionsMenu({
 			
 				// Cancel Action
 				cancelBtn.addEventListener("click", () => {
-					content.empty();
-					content.appendChild(originalContent);
+					restore();
 				});
 			
 				// Save Action
@@ -414,8 +494,22 @@ function createMessageActionsMenu({
 							newMarkdown
 						);
 						
+
+
 						if (editor){
-							editor.setValue(lines.join("\n"));
+
+							// changes whole document = inefficient + triggers yaml changes (rerender)
+							// editor.setValue(lines.join("\n"));
+							console.log(
+								{ line: section.lineStart, ch: 0 },
+								{ line: section.lineEnd + 1, ch: 0 }
+							)
+							editor.replaceRange(
+								newMarkdown,
+								{ line: section.lineStart, ch: 0 },
+								{ line: section.lineEnd +1, ch: 0 }
+							);
+
 						} else {
 							await app.vault.modify(file, lines.join("\n"));
 						}
@@ -431,6 +525,9 @@ function createMessageActionsMenu({
 							// eslint-disable-next-line obsidianmd/no-plugin-as-component
 							plugin
 						);
+
+						// clear the active editor
+						plugin.clearActiveEditor({ container: editorWrapper });
 					})();
 
 				});
