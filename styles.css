@@ -191,3 +191,44 @@ body.menu-btn-no-shadow .msg-action-btn {
 .msg-editor-wrapper .msg-btn {
     align-self: flex-end;
 }
+
+/* --------------------------------*/
+/* INPUT FIELD */
+/* --------------------------------*/
+
+.chat-input-container {
+    position: sticky;
+    margin-bottom: 7px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
+    min-height: 52px; 
+    display: flex;
+    gap: 8px;
+    background: var(--background-primary);
+    /* border: 1px solid var(--background-modifier-border); */
+    border: 1px solid var(--background-primary);
+    border-radius: 28px;
+}
+
+.cm-contentContainer,
+.markdown-preview-sizer {
+padding-bottom: 80px;
+}
+
+.markdown-preview-view,
+.cm-sizer {
+    position: relative;
+}
+
+.chat-input {
+    flex: 1;
+    resize: none;
+    margin: 2px;
+}
+
+.chat-send-button {
+    flex-shrink: 0;
+    position: relative;
+}

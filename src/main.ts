@@ -1,6 +1,6 @@
 import { Plugin, MarkdownRenderer, setIcon, Notice, TFile, App, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
-import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
+import { Message, Header, CreateHTMLParams, CreateMenuParams } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab } from "./settings"
 
 function isChatFile(app: App, file: TFile): boolean {
@@ -12,12 +12,15 @@ export default class ChatNotesPlugin extends Plugin {
 	
 	openMenu: HTMLElement | null = null;
 	settings: ChatNotesPluginSettings;
+
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
 
 	private chatFileState = new Map<string, boolean>();
+	chatInputEl: HTMLElement;
+	chatTextareaEl: HTMLTextAreaElement;
 
 	async refreshFile(file: TFile) {
 		
@@ -52,7 +55,7 @@ export default class ChatNotesPlugin extends Plugin {
 		cmScroller?.scrollTo({ top: cmScroller.scrollHeight });
 		
 		container.scrollTop = container.scrollHeight;
-		}
+	}
 
 	async onload() {
 
@@ -73,7 +76,7 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 
 		this.registerEvent(
-			/* Detect file switchesand scroll to the bottom on chat files */
+			/* Detect file switches and scroll to the bottom on chat files */
 
 				this.app.workspace.on("active-leaf-change", async (leaf) => {
 					console.log("File switch")
@@ -93,6 +96,38 @@ export default class ChatNotesPlugin extends Plugin {
 				})
 		  );
 
+		/*
+		this.registerEvent(
+		this.app.workspace.on("active-leaf-change", () => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const file = this.app.workspace.getActiveFile();
+
+			if (!view || !file || !isChatFile(this.app, file)) {
+			this.chatInputEl.style.display = "none";
+			return;
+			}
+
+			this.chatInputEl.style.display = "flex";
+
+			// Move into correct container
+			view.containerEl.appendChild(this.chatInputEl);
+		})
+		); */
+
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", () => {
+			  const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			  if (!view) return;
+			  setTimeout(() => this.updateChatInputPosition(view), 50);
+			})
+		  );
+		  
+		window.addEventListener("resize", () => {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) return;
+		this.updateChatInputPosition(view);
+		});
+		
 		this.registerEvent(
 			/* Detect yaml changes and refresh/rerender the file if it becomes or is no longer a chat note */
 
@@ -115,7 +150,6 @@ export default class ChatNotesPlugin extends Plugin {
 			})
 		);
 
-		
 		this.registerMarkdownCodeBlockProcessor(
 			"chat-message",
 			async (source, el, ctx) => {
@@ -172,6 +206,83 @@ export default class ChatNotesPlugin extends Plugin {
 
 			}
 		);
+		
+
+		// create input field
+		this.app.workspace.onLayoutReady(() => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (view) {
+				console.log(" view found")
+				this.createChatInput(view);
+			  	this.updateChatInputPosition(view);
+			} else {
+				console.log("No view found")
+			}
+		  });
+	}
+
+	onunload() {
+		this.chatInputEl?.remove();
+	}
+
+	createChatInput(view: MarkdownView) {
+
+		this.chatInputEl = createDiv("chat-input-container");
+		// const container = getContentContainer(view);
+		// if (!container) {
+		// 	console.log("no container found")
+		// 	return
+		// }
+		// container.appendChild(this.chatInputEl);
+		document.body.appendChild(this.chatInputEl);
+
+		this.chatTextareaEl = this.chatInputEl.createEl("textarea", {
+			cls: "chat-input"
+		});
+	
+		const button = this.chatInputEl.createEl("button");
+		button.className = "chat-send-button";
+		setIcon(button, "send");
+	
+		button.onclick = async () => {
+			const file = this.app.workspace.getActiveFile();
+			if (!file || !isChatFile(this.app, file)) return;
+		
+			const value = this.chatTextareaEl.value.trim();
+			if (!value) return;
+		
+			await this.appendMessage(file, value);
+			this.chatTextareaEl.value = "";
+		};
+
+	}
+
+	updateChatInputPosition(view: MarkdownView) {
+
+		const metrics = getContentMetrics(view);
+		if (!metrics) return;
+	
+		this.chatInputEl.style.position = "fixed";
+		this.chatInputEl.style.bottom = "0px";
+
+		let width = metrics.width
+		let left = metrics.left
+
+		// set default values when in reading mode
+		if (!width  || width === 0) width = 700;
+		if (!left  || left === 0) left = 626;
+
+		this.chatInputEl.style.width = `${width}px`;
+		this.chatInputEl.style.left = `${left}px`;
+
+	}
+
+	async appendMessage(file: TFile, content: string) {
+		// TODO: create and save standart header for every chat? map?
+		// const chat_header = new Header();
+		// const msg = new Message(chat_header, content);
+		await this.app.vault.append(file, "msg.toString()");
+
 	}
 
 	handleMenuToggle(menu: HTMLElement) {
@@ -182,13 +293,13 @@ export default class ChatNotesPlugin extends Plugin {
 		const isOpening = !menu.classList.contains("menu-open");
 		menu.classList.toggle("menu-open");
 		this.openMenu = isOpening ? menu : null;
+
 	}
 
 	handleOpenEditor(newEditor: {
 		container: HTMLElement;
 		restore: () => void;
 	}) {
-
 
 		// If same editor = do nothing
 		if (this.activeEditor?.container === newEditor.container) {
@@ -211,6 +322,7 @@ export default class ChatNotesPlugin extends Plugin {
 		if (this.activeEditor?.container === editor.container) {
 			this.activeEditor = null;
 		}
+
 	}
 
 	async loadSettings() {
@@ -222,11 +334,13 @@ export default class ChatNotesPlugin extends Plugin {
 		};
 	
 		this.applyStyles();
+
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.applyStyles();
+
 	}		
 
 	applyStyles() {
@@ -247,10 +361,27 @@ export default class ChatNotesPlugin extends Plugin {
 		} else {
 			body.classList.add("menu-btn-no-shadow");
 		}
+
 	}
 
 }
 
+
+
+function getContentMetrics(view: MarkdownView) {
+	const el =
+	  view.containerEl.querySelector(".cm-contentContainer") ||
+	  view.containerEl.querySelector(".markdown-preview-sizer");
+  
+	if (!el) return null;
+  
+	const rect = el.getBoundingClientRect();
+  
+	return {
+	  width: rect.width,
+	  left: rect.left
+	};
+}
 
 function createElementsHTML({plugin, ctx, source, author_text, timestamp_text, onToggle} : CreateHTMLParams){
 	/*
@@ -259,7 +390,6 @@ function createElementsHTML({plugin, ctx, source, author_text, timestamp_text, o
 
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
-
 	const content = document.createElement("div");
 	content.className = "message-content";
 
