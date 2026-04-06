@@ -197,15 +197,22 @@ body.menu-btn-no-shadow .msg-action-btn {
 /* --------------------------------*/
 
 .chat-input-container {
-    position: sticky;
-    margin-bottom: 7px;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100; /* prevent other themes from overlaying bars on top of the input field */
+    pointer-events: auto;
+    display: flex;
+
+    margin-bottom: 1%;
     padding-top: 10px;
     padding-bottom: 10px;
     padding-left: 14px;
     padding-right: 14px;
-    min-height: 52px; 
-    display: flex;
+    min-height: 72px; 
     gap: 8px;
+
     background: var(--background-primary);
     /* border: 1px solid var(--background-modifier-border); */
     border: 1px solid var(--background-primary);

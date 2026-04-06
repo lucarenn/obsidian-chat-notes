@@ -21,6 +21,7 @@ export default class ChatNotesPlugin extends Plugin {
 	private chatFileState = new Map<string, boolean>();
 	chatInputEl: HTMLElement;
 	chatTextareaEl: HTMLTextAreaElement;
+	resizeObserver: ResizeObserver | null = null;
 
 	async refreshFile(file: TFile) {
 		
@@ -33,6 +34,8 @@ export default class ChatNotesPlugin extends Plugin {
 			if (!(view instanceof MarkdownView)) continue;
 			if (view.file?.path !== file.path) continue;
 	
+			this.updateChatInputPosition(view);
+
 			if (view.getMode() === "preview") {
 				view.previewMode.rerender(true);
 			} else {
@@ -57,6 +60,20 @@ export default class ChatNotesPlugin extends Plugin {
 		container.scrollTop = container.scrollHeight;
 	}
 
+	setupResizeObserver(view: MarkdownView) {
+		const el = view.contentEl;
+		if (!el) return;
+	  
+		// Clean up previous observer if needed
+		this.resizeObserver?.disconnect();
+	  
+		this.resizeObserver = new ResizeObserver(() => {
+		  this.updateChatInputPosition(view);
+		});
+	  
+		this.resizeObserver.observe(el);
+	}
+
 	async onload() {
 
 		await this.loadSettings();
@@ -76,56 +93,48 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 
 		this.registerEvent(
-			/* Detect file switches and scroll to the bottom on chat files */
+			/* Detect file switches and scroll to the bottom on chat files, update chat input position */
 
 				this.app.workspace.on("active-leaf-change", async (leaf) => {
+
 					console.log("File switch")
-				if (!leaf) return;
-			
-				const view = leaf.view;
-				if (!(view instanceof MarkdownView)) return;
-			  
-				const file = view.file; // <-- active file
-				if (!file) return;
-				if (!isChatFile(this.app, file)) return;
-			
-				// Delay to ensure rendering is complete
-				setTimeout(() => {
-					this.scrollToBottom(view);
+
+					if (!leaf) return;
+					const view = leaf.view;
+					if (!(view instanceof MarkdownView)) return;
+
+					const file = view.file;
+
+					if (!file || !isChatFile(this.app, file)) {
+						this.chatInputEl.style.display = "none";
+						this.resizeObserver?.disconnect();
+						return;
+					}
+				  
+					// Show input field
+					this.chatInputEl.style.display = "flex";
+					// Attach to correct container
+					view.contentEl.appendChild(this.chatInputEl);	
+
+					// Watch for itern widow resizes
+					this.setupResizeObserver(view);
+
+					// Update the input field position and scroll down after render
+					setTimeout(() => {
+					  this.updateChatInputPosition(view);
+					  // TODO move to dedicated button?
+					  this.scrollToBottom(view);
 					}, 50);
+
 				})
 		  );
 
-		/*
-		this.registerEvent(
-		this.app.workspace.on("active-leaf-change", () => {
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			const file = this.app.workspace.getActiveFile();
-
-			if (!view || !file || !isChatFile(this.app, file)) {
-			this.chatInputEl.style.display = "none";
-			return;
-			}
-
-			this.chatInputEl.style.display = "flex";
-
-			// Move into correct container
-			view.containerEl.appendChild(this.chatInputEl);
-		})
-		); */
-
-		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", () => {
-			  const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			  if (!view) return;
-			  setTimeout(() => this.updateChatInputPosition(view), 50);
-			})
-		  );
-		  
 		window.addEventListener("resize", () => {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view) return;
-		this.updateChatInputPosition(view);
+			console.log("resize");
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) return;
+			this.updateChatInputPosition(view);
+
 		});
 		
 		this.registerEvent(
@@ -136,7 +145,7 @@ export default class ChatNotesPlugin extends Plugin {
 				console.log("Yaml change detected");
 				if (!(file instanceof TFile)) return;
 		
-				// TODO always rerender if chat is true and markdown change is detected
+				// TODO always rerender if chat is true and markdown change is detected (visuals may have been overriden)
 				const current = isChatFile(this.app, file);
 				const prev = this.chatFileState.get(file.path);
 				if (prev === current) return;
@@ -228,13 +237,7 @@ export default class ChatNotesPlugin extends Plugin {
 	createChatInput(view: MarkdownView) {
 
 		this.chatInputEl = createDiv("chat-input-container");
-		// const container = getContentContainer(view);
-		// if (!container) {
-		// 	console.log("no container found")
-		// 	return
-		// }
-		// container.appendChild(this.chatInputEl);
-		document.body.appendChild(this.chatInputEl);
+		view.contentEl.appendChild(this.chatInputEl);
 
 		this.chatTextareaEl = this.chatInputEl.createEl("textarea", {
 			cls: "chat-input"
@@ -259,6 +262,15 @@ export default class ChatNotesPlugin extends Plugin {
 
 	updateChatInputPosition(view: MarkdownView) {
 
+		const inner =
+			view.containerEl.querySelector(".cm-contentContainer") ||
+			view.containerEl.querySelector(".markdown-preview-sizer");
+		if (!inner) return;
+
+		const rect = inner.getBoundingClientRect();
+		const parentRect = view.contentEl.getBoundingClientRect();
+		const offsetLeft = rect.left - parentRect.left;
+
 		const metrics = getContentMetrics(view);
 		if (!metrics) return;
 	
@@ -270,11 +282,17 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// set default values when in reading mode
 		if (!width  || width === 0) width = 700;
-		if (!left  || left === 0) left = 626;
+		if (!left  || left === 0) left =  626;
+		const margin = 4; // margin of input field to left and right document border
 
-		this.chatInputEl.style.width = `${width}px`;
-		this.chatInputEl.style.left = `${left}px`;
+		// this.chatInputEl.style.left = `${metrics.left + margin}px`;
+		// this.chatInputEl.style.width = `${metrics.width - margin * 2}px`;
 
+		// this.chatInputEl.style.width = `${width}px`;
+		// this.chatInputEl.style.left = `${left}px`;
+
+		this.chatInputEl.style.width = `${rect.width}px`;
+		this.chatInputEl.style.left = `${offsetLeft}px`;
 	}
 
 	async appendMessage(file: TFile, content: string) {
@@ -365,8 +383,6 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 }
-
-
 
 function getContentMetrics(view: MarkdownView) {
 	const el =
