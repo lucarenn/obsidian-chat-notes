@@ -1,4 +1,4 @@
-import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf } from "obsidian";
+import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf, Notice } from "obsidian";
 import { Message, Header, } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab } from "./settings"
 import { createElementsHTML } from "./ui"
@@ -9,17 +9,82 @@ export default class ChatNotesPlugin extends Plugin {
 	
 	openMenu: HTMLElement | null = null;
 	settings: ChatNotesPluginSettings;
+	chatInputEl: HTMLElement;
+	chatTextareaEl: HTMLTextAreaElement;
+	resizeObserver: ResizeObserver | null = null;
+	private chatFileState = new Map<string, boolean>();	// store for each file if its a chat file or not
+	private inputState = new Map<string, string>();  // store for each file an individual message draft
+	currentFile: TFile | null = null;
 
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
 
-	private chatFileState = new Map<string, boolean>();
-	chatInputEl: HTMLElement;
-	chatTextareaEl: HTMLTextAreaElement;
-	resizeObserver: ResizeObserver | null = null;
 
+	getInputValue(): string {
+		//TODO return if not initialized?
+		const input = this.chatInputEl.querySelector("textarea, input");
+		return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+			? input.value
+			: "";
+	}
+	
+	setInputValue(value: string) {
+		//TODO lazy initialize? -> need to get view
+		const input = this.chatInputEl.querySelector("textarea, input");
+		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+			input.value = value;
+		}
+	}
+
+	async onFileSwitch(leaf: WorkspaceLeaf) {
+
+		if (!leaf) return;
+		const view = leaf.view;
+		if (!(view instanceof MarkdownView)) return;
+		const input = this.getChatInput();
+		const newFile = view.file;
+
+		// Save old file input
+		if (this.currentFile && this.chatInputEl) {
+			this.inputState.set(
+				this.currentFile.path,
+				this.getInputValue()
+			);
+		}
+
+		// return if new file is not a chat file
+		if (!newFile || !isChatFile(this.app, newFile)) {
+			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+			input.style.display = "none";
+			this.resizeObserver?.disconnect();
+			this.currentFile = null;
+			return;
+		}
+
+		// restore new file input if present
+		this.currentFile = newFile
+		const saved = this.inputState.get(newFile.path) ?? "";
+		this.setInputValue(saved);
+
+		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+		input.style.display = "flex";
+		if (input.parentElement !== view.contentEl) {
+			view.contentEl.appendChild(input);
+		}
+
+		// Watch for iternal widow resizes
+		this.setupResizeObserver(view);
+
+		// Update the input field position and scroll down after render
+		setTimeout(() => {
+		  this.updateChatInputPosition(view);
+		  // TODO move to dedicated button?
+		  scrollToBottom(view);
+		}, 50);
+
+	}
 
 	async onload() {
 
@@ -28,6 +93,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
 		document.addEventListener("click", (event) => {
+			// on CLICK ANYWHERE
 			/* Detect clicks outside a message action menu and closes the current open menu */
 
 			if (!this.openMenu) return;
@@ -40,44 +106,16 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 
 		this.registerEvent(
+			// on FILE SWITCH
 			/* Detect file switches and scroll to the bottom on chat files, update chat input position */
 
 				this.app.workspace.on("active-leaf-change", async (leaf) => {
-
-					if (!leaf) return;
-					const view = leaf.view;
-					if (!(view instanceof MarkdownView)) return;
-
-					const input = this.getChatInput(view);
-					const file = view.file;
-
-					if (!file || !isChatFile(this.app, file)) {
-						// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-						input.style.display = "none";
-						this.resizeObserver?.disconnect();
-						return;
-					}
-				  
-					// Show input field
-					// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-					input.style.display = "flex";
-					// Attach to correct container
-					view.contentEl.appendChild(input);	
-
-					// Watch for itern widow resizes
-					this.setupResizeObserver(view);
-
-					// Update the input field position and scroll down after render
-					setTimeout(() => {
-					  this.updateChatInputPosition(view);
-					  // TODO move to dedicated button?
-					  scrollToBottom(view);
-					}, 50);
-
+					await this.onFileSwitch(leaf);
 				})
 		  );
 
 		window.addEventListener("resize", () => {
+			// on WINDOW RESIZE
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!view) return;
 			this.updateChatInputPosition(view);
@@ -85,6 +123,7 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 		
 		this.registerEvent(
+			// on METADATA FILE CHANGES
 			/* Detect yaml changes and refresh/rerender the file if it becomes or is no longer a chat note */
 
 			this.app.metadataCache.on("changed", (file) => {
@@ -176,43 +215,49 @@ export default class ChatNotesPlugin extends Plugin {
 		this.chatInputEl?.remove();
 	}
 
-	getChatInput(view: MarkdownView): HTMLElement {
+	getChatInput(): HTMLElement {
 		if (!this.chatInputEl) {
-			this.createChatInput(view);
+			this.chatInputEl = this.createChatInput();
 		}
 		return this.chatInputEl;
-
 	}
 
-	createChatInput(view: MarkdownView) {
-
-		this.chatInputEl = createDiv("chat-input-container");
-		view.contentEl.appendChild(this.chatInputEl);
-
-		this.chatTextareaEl = this.chatInputEl.createEl("textarea", {
+	createChatInput(): HTMLElement {
+		const container = createDiv("chat-input-container");
+	
+		this.chatTextareaEl = container.createEl("textarea", {
 			cls: "chat-input"
 		});
 	
-		const button = this.chatInputEl.createEl("button");
+		this.chatTextareaEl.oninput = () => {
+			if (this.currentFile) {
+				this.inputState.set(this.currentFile.path, this.chatTextareaEl.value);
+			}
+		};
+	
+		const button = container.createEl("button");
 		button.className = "chat-send-button";
 		setIcon(button, "send");
 	
 		button.onclick = async () => {
 			const file = this.app.workspace.getActiveFile();
 			if (!file || !isChatFile(this.app, file)) return;
-		
+	
 			const value = this.chatTextareaEl.value.trim();
 			if (!value) return;
-		
+	
 			await this.appendMessage(file, value);
-			this.chatTextareaEl.value = "";
+	
+			this.setInputValue("");
+			this.inputState.set(file.path, "");
 		};
-
+	
+		return container;
 	}
 
 	updateChatInputPosition(view: MarkdownView) {
 
-		const input = this.getChatInput(view);
+		const input = this.getChatInput();
 		const inner =
 			view.containerEl.querySelector(".cm-contentContainer") ||
 			view.containerEl.querySelector(".markdown-preview-sizer");
