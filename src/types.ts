@@ -1,8 +1,8 @@
-import { MarkdownPostProcessorContext, Plugin } from "obsidian";
-
+import { MarkdownPostProcessorContext } from "obsidian";
+import ChatNotesPlugin from "./main"
 
 export type CreateHTMLParams = {
-    plugin: Plugin;
+    plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
 	source: string;
 	author_text: string;
@@ -11,7 +11,7 @@ export type CreateHTMLParams = {
 };
 
 export type CreateMenuParams = {
-    plugin: Plugin;
+    plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
 	source: string;
 	wrapper: HTMLElement;

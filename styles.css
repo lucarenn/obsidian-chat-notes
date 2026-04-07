@@ -197,7 +197,7 @@ body.menu-btn-no-shadow .msg-action-btn {
 /* --------------------------------*/
 
 .chat-input-container {
-    position: absolute;
+    position: absolute; /* fixed; ? */
     bottom: 0;
     left: 0;
     right: 0;
