@@ -2,7 +2,7 @@ import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf }
 import { Message, Header, } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab } from "./settings"
 import { createElementsHTML } from "./ui"
-import { getContentMetrics, isChatFile } from "./util"
+import { isChatFile, scrollToBottom } from "./util"
 
 
 export default class ChatNotesPlugin extends Plugin {
@@ -20,54 +20,6 @@ export default class ChatNotesPlugin extends Plugin {
 	chatTextareaEl: HTMLTextAreaElement;
 	resizeObserver: ResizeObserver | null = null;
 
-	async refreshFile(file: TFile) {
-		
-		const leaves = this.app.workspace.getLeavesOfType("markdown");
-	
-		for (const leaf of leaves) {
-			const view = leaf.view;
-	
-			if (!(view instanceof MarkdownView)) continue;
-			if (view.file?.path !== file.path) continue;
-	
-			this.updateChatInputPosition(view);
-
-			if (view.getMode() === "preview") {
-				view.previewMode.rerender(true);
-			} else {
-				// editor in live preview (source mode)
-				type RebuildableLeaf = WorkspaceLeaf & {
-					rebuildView: () => Promise<void>;
-				};
-				
-				await (leaf as RebuildableLeaf).rebuildView();
-			}
-		}
-	}
-	
-	scrollToBottom(view: MarkdownView) {
-		const container = view.containerEl.querySelector(".markdown-preview-view");
-		if (!container) return;
-
-		const cmScroller = view.containerEl.querySelector(".cm-scroller");
-		cmScroller?.scrollTo({ top: cmScroller.scrollHeight });
-		
-		container.scrollTop = container.scrollHeight;
-	}
-
-	setupResizeObserver(view: MarkdownView) {
-		const el = view.contentEl;
-		if (!el) return;
-	  
-		// Clean up previous observer if needed
-		this.resizeObserver?.disconnect();
-	  
-		this.resizeObserver = new ResizeObserver(() => {
-		  this.updateChatInputPosition(view);
-		});
-	  
-		this.resizeObserver.observe(el);
-	}
 
 	async onload() {
 
@@ -96,20 +48,21 @@ export default class ChatNotesPlugin extends Plugin {
 					const view = leaf.view;
 					if (!(view instanceof MarkdownView)) return;
 
+					const input = this.getChatInput(view);
 					const file = view.file;
 
 					if (!file || !isChatFile(this.app, file)) {
 						// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-						this.chatInputEl.style.display = "none";
+						input.style.display = "none";
 						this.resizeObserver?.disconnect();
 						return;
 					}
 				  
 					// Show input field
 					// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-					this.chatInputEl.style.display = "flex";
+					input.style.display = "flex";
 					// Attach to correct container
-					view.contentEl.appendChild(this.chatInputEl);	
+					view.contentEl.appendChild(input);	
 
 					// Watch for itern widow resizes
 					this.setupResizeObserver(view);
@@ -118,7 +71,7 @@ export default class ChatNotesPlugin extends Plugin {
 					setTimeout(() => {
 					  this.updateChatInputPosition(view);
 					  // TODO move to dedicated button?
-					  this.scrollToBottom(view);
+					  scrollToBottom(view);
 					}, 50);
 
 				})
@@ -214,7 +167,6 @@ export default class ChatNotesPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view) {
-				this.createChatInput(view);
 			  	this.updateChatInputPosition(view);
 			}
 		  });
@@ -222,6 +174,14 @@ export default class ChatNotesPlugin extends Plugin {
 
 	onunload() {
 		this.chatInputEl?.remove();
+	}
+
+	getChatInput(view: MarkdownView): HTMLElement {
+		if (!this.chatInputEl) {
+			this.createChatInput(view);
+		}
+		return this.chatInputEl;
+
 	}
 
 	createChatInput(view: MarkdownView) {
@@ -252,6 +212,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	updateChatInputPosition(view: MarkdownView) {
 
+		const input = this.getChatInput(view);
 		const inner =
 			view.containerEl.querySelector(".cm-contentContainer") ||
 			view.containerEl.querySelector(".markdown-preview-sizer");
@@ -262,11 +223,10 @@ export default class ChatNotesPlugin extends Plugin {
 		const parentRect = view.contentEl.getBoundingClientRect();
 		const offsetLeft = rect.left - parentRect.left;
 
-		this.chatInputEl.style.width = `${rect.width - margin * 2}px`;
-		this.chatInputEl.style.left = `${offsetLeft + margin}px`;
+		input.style.width = `${rect.width - margin * 2}px`;
+		input.style.left = `${offsetLeft + margin}px`;
 
 	}
-
 
 	async appendMessage(file: TFile, content: string) {
 		// TODO: create and save standart header for every chat? map?
@@ -274,6 +234,45 @@ export default class ChatNotesPlugin extends Plugin {
 		// const msg = new Message(chat_header, content);
 		await this.app.vault.append(file, "msg.toString()");
 
+	}
+
+	async refreshFile(file: TFile) {
+		
+		const leaves = this.app.workspace.getLeavesOfType("markdown");
+	
+		for (const leaf of leaves) {
+			const view = leaf.view;
+	
+			if (!(view instanceof MarkdownView)) continue;
+			if (view.file?.path !== file.path) continue;
+	
+			this.updateChatInputPosition(view);
+
+			if (view.getMode() === "preview") {
+				view.previewMode.rerender(true);
+			} else {
+				// editor in live preview (source mode)
+				type RebuildableLeaf = WorkspaceLeaf & {
+					rebuildView: () => Promise<void>;
+				};
+				
+				await (leaf as RebuildableLeaf).rebuildView();
+			}
+		}
+	}
+	
+	setupResizeObserver(view: MarkdownView) {
+		const el = view.contentEl;
+		if (!el) return;
+	  
+		// Clean up previous observer if needed
+		this.resizeObserver?.disconnect();
+	  
+		this.resizeObserver = new ResizeObserver(() => {
+		  this.updateChatInputPosition(view);
+		});
+	  
+		this.resizeObserver.observe(el);
 	}
 
 	handleMenuToggle(menu: HTMLElement) {
