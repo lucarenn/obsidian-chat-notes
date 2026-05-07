@@ -1,6 +1,26 @@
 import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
+import { scrollDocument } from "./util"
+
+
+export function addScrollButtons(view: MarkdownView) {
+	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+	if (!view) return;
+
+	// Avoid adding multiple times
+	if ((view as any)._myButtonAdded) return;
+	(view as any)._myButtonAdded = true;
+
+	view.addAction("arrow-up", "Scroll to top", (evt) => {
+		scrollDocument(view, "top")
+	});
+
+	view.addAction("arrow-down", "Scroll to bottom", (evt) => {
+		scrollDocument(view, "bottom")
+	});
+}
+
 
 export function createElementsHTML({plugin, ctx, source, author_text, timestamp_text, onToggle} : CreateHTMLParams){
 	/*

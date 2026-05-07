@@ -1,8 +1,21 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
+import {App, PluginSettingTab, Setting, TFile} from "obsidian";
 import ChatNotesPlugin from "./main";
 
 
-export interface ChatNotesPluginSettings {
+
+export interface ChatConfig {
+	// holds all possible settings for a chat (can be more than global settings)
+
+	messageBgColor?: string;
+	enableButtonShadow?: boolean;
+    messageCornerRadius?: number;
+	chatId?: string;
+	author?: string;
+	// add future settings here
+}
+
+
+export interface ChatNotesPluginSettings extends ChatConfig {
 	messageBgColor: string;
 	enableButtonShadow: boolean;
     messageCornerRadius: number;
@@ -65,3 +78,32 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
     }
 }
+
+
+export function getFileOverrides(app: App, file: TFile): ChatConfig {
+	const cache = app.metadataCache.getFileCache(file);
+	const fm = cache?.frontmatter;
+  
+	if (!fm) return {};
+  
+	return {
+		chatId: fm.chatId,
+		author: fm.author,
+		messageBgColor: fm.messageBgColor,
+	};
+}
+
+export function resolveConfig(
+	global: ChatNotesPluginSettings,
+	overrides: ChatConfig
+  ): ChatConfig {
+	return {
+	  ...global,
+	  ...Object.fromEntries(
+		Object.entries(overrides).filter(([_, v]) => v !== undefined)
+	  ),
+	};
+}
+
+
+

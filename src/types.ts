@@ -1,4 +1,5 @@
-import { MarkdownPostProcessorContext } from "obsidian";
+import { MarkdownPostProcessorContext, FrontMatterCache} from "obsidian";
+import { ChatConfig } from "./settings";
 import ChatNotesPlugin from "./main"
 
 export type CreateHTMLParams = {
@@ -18,7 +19,6 @@ export type CreateMenuParams = {
 	content: HTMLDivElement;
 	onToggle: (menu: HTMLElement) => void;
 };
-
 
 
 export class Header {
@@ -105,3 +105,14 @@ export class Message {
 	}
 }
 
+export class File{
+	constructor(
+		public path: string,
+		public isChatNote: boolean,
+		public inputState: string,
+		public settingsCache: ChatConfig,
+		public yamlCache: FrontMatterCache,
+		public HTMLContainers: Set<HTMLElement>
+	) {}
+
+}

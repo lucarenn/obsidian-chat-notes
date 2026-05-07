@@ -6,12 +6,17 @@ export function isChatFile(app: App, file: TFile): boolean {
 	return cache?.frontmatter?.type === "chat";
 }
 
-export function scrollToBottom(view: MarkdownView) {
-    const container = view.containerEl.querySelector(".markdown-preview-view");
-    if (!container) return;
+export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
+	const preview = view.containerEl.querySelector(".markdown-preview-view");
+	const cmScroller = view.containerEl.querySelector(".cm-scroller");
 
-    const cmScroller = view.containerEl.querySelector(".cm-scroller");
-    cmScroller?.scrollTo({ top: cmScroller.scrollHeight });
-    
-    container.scrollTop = container.scrollHeight;
+	const targetTop = position === "top" ? 0 : Number.MAX_SAFE_INTEGER;
+
+	if (cmScroller) {
+		cmScroller.scrollTo({ top: targetTop });
+	}
+
+	if (preview) {
+		preview.scrollTop = position === "top" ? 0 : preview.scrollHeight;
+	}
 }

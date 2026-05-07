@@ -5,6 +5,7 @@
     --msg-bg-color: var(--settings-msg-bg-color, var(--color-base-20));   /* #57966f */
     --editor-bg-color: color-mix(in srgb, var(--msg-bg-color) 82%, black);    /* Editor bg color = message bg color just darker */
     --msg-corner-radius: var(--settings-msg-corner-radius, 12px);
+    --msg-border-color: #ffffff3d;
 }
 
 /* --------------------------------*/
@@ -23,10 +24,19 @@
     margin: 10px 0;
     border-radius: var(--msg-corner-radius);
     max-width: 100%;
-    background-color: var(--msg-bg-color);  
+    background-color: var(--msg-bg-color) !important;  
 
-    border: 1px solid #ffffff3d;
+    border: 1px solid var(--msg-border-color);
 }
+
+.markdown-reading-view .chat-message
+{
+    background-color: var(--settings-msg-bg-color) !important;
+}
+.markdown-source-view.mod-cm6 .chat-message {
+    background-color: var(--settings-msg-bg-color) !important;
+}
+
 
 /* Set note background to transparent (just display messages) */
 .markdown-reading-view .markdown-preview-view,
@@ -214,8 +224,7 @@ body.menu-btn-no-shadow .msg-action-btn {
     gap: 8px;
 
     background: var(--background-primary);
-    /* border: 1px solid var(--background-modifier-border); */
-    border: 1px solid var(--background-primary);
+    border: 1px solid var(--msg-border-color); 
     border-radius: 28px;
 }
 
