@@ -1,10 +1,8 @@
-import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf, Notice, FrontMatterCache, TAbstractFile } from "obsidian";
-import { Message, Header, File } from "./types"
+import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf, Notice, TAbstractFile } from "obsidian";
+import { Message, Header, ChatNote } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
-import { createElementsHTML, addScrollButtons } from "./ui"
+import { createElementsHTML, addScrollButtons, createChatInput } from "./ui"
 import { isChatFile, scrollDocument } from "./util"
-import { Context } from "vm";
-
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -15,24 +13,20 @@ export default class ChatNotesPlugin extends Plugin {
 	resizeObserver: ResizeObserver | null = null;
 	currentFile: TFile | null = null;
 
-	// TODO move to file class
-	// private chatNotes = new Array<ChatNote>; 
-
-	private chatFileState = new Map<string, boolean>();	// store for each file if its a chat file or not
-	private inputState = new Map<string, string>();  // store for each file an individual message draft
-	fileConfigCache = new WeakMap<TFile, ChatConfig>(); // cache for the config of each file. needs to be updated before render
-	private frontmatterCache: Map<string, FrontMatterCache> = new Map(); // yaml cache?
+	private chatNotes = new WeakMap<TFile, ChatNote>();
 	
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
 
-	prepareFileConfig(file: TAbstractFile) {
+	updateFileConfig(file: TAbstractFile) {
+		// update and store config cache for a file
 		if (!(file instanceof TFile)) return;
 		const overrides = getFileOverrides(this.app, file);
 		const resolved = resolveConfig(this.settings, overrides);
-		this.fileConfigCache.set(file, resolved);
+		this.getChatNote(file).configCache = resolved;
+		return resolved;
 	}
 
 	async onload() {
@@ -68,7 +62,7 @@ export default class ChatNotesPlugin extends Plugin {
 					const file = view?.file;
 					if (!file) return;
 
-					this.prepareFileConfig(file);
+					this.updateFileConfig(file);
 					await this.onFileSwitch(file, view);
 				})
 		  );
@@ -93,7 +87,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.registerEvent(
 			// TODO check if needed?
 			this.app.vault.on("modify", (file) => {
-			  this.prepareFileConfig(file);
+			  this.updateFileConfig(file);
 			})
 		);
 
@@ -101,35 +95,16 @@ export default class ChatNotesPlugin extends Plugin {
 			"chat-message",
 			async (source, el, ctx) => {
 				
-				// Check if file is a chat
 				const file = ctx.sourcePath
 				? this.app.vault.getAbstractFileByPath(ctx.sourcePath)
 				: null;
 				if (!(file instanceof TFile)) return;
 
-				// Parse codeblock to message
-				const msg = Message.fromString(source);
+				const note = this.getChatNote(file);
+				const config = this.getChatNoteConfigCache(file);
 
-				// get config for this chat file
-				if (!this.fileConfigCache.has(file)) {
-					this.prepareFileConfig(file)
-				}
-				const config = this.fileConfigCache.get(file)!;
-
-				// Create HTML structure for message
-				const {wrapper, content } = createElementsHTML({
-					plugin: this,
-					ctx,
-					source,
-					author_text: msg.header.author ?? config.author,
-					timestamp_text: msg.header.timestamp,
-					onToggle: this.handleMenuToggle.bind(this)
-				});
-				
-				// Only render if file has type: chat
-				const fs = this.chatFileState.get(file.path)
-				const isChatNote = fs === undefined ? isChatFile(this.app, file) : fs;
-				if (!isChatNote) {
+				// Only render if the file has type: chat in yaml properties
+				if (!this.getIsChatNote(file)) {
 					// for now fallback render for non chat notes.
 					// TODO remove render completely and display default code block
 
@@ -144,6 +119,19 @@ export default class ChatNotesPlugin extends Plugin {
 
 					return;
 				}
+
+				// Parse codeblock to message
+				const msg = Message.fromString(source);
+
+				// Create HTML structure for message
+				const {wrapper, content } = createElementsHTML({
+					plugin: this,
+					ctx,
+					source,
+					author_text: msg.header.author ?? config.author,
+					timestamp_text: msg.header.timestamp,
+					onToggle: this.handleMenuToggle.bind(this)
+				});
 				
 				// attach message to file html container
 				el.appendChild(wrapper);
@@ -179,7 +167,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	getActiveContainers(file: TAbstractFile){
 		// get all html containers of the given file (multiple depending on mode and if the file is opened multiple times) 
-
+		console.log("GATHERING ALL ACTIVE HTML CONTAINERS -------------------------------")
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
 
 		const containers = []
@@ -193,7 +181,7 @@ export default class ChatNotesPlugin extends Plugin {
 			const fileContainers = [
 				view.previewMode?.containerEl,
 				view.contentEl,
-				view.editor?.cm?.dom
+				// view.editor?.cm?.dom // raw CodeMirror editor DOM, needed?
 			];
 
 			// only return available containers
@@ -213,14 +201,11 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	applyConfigStylesToFile(file: TFile){
-		// get all html containers of the open files and call applyScopedStyles on them with their current config
-		// TODO check if the given file overrides container configs of other files (because its applied to all containers)
+		// get all html containers of the open file and call applyScopedStyles on them with their current config
 
 		const allContainers = this.getActiveContainers(file)
-		console.log(allContainers!.length)
-		// const containers = this.fileHTMLContainers.get(file.path);
-		const config = this.fileConfigCache.get(file)!;
 		if (!allContainers) return;
+		const config = this.getChatNoteConfigCache(file)!;
 		for (const fileContainers of allContainers) {
 			for (const container of fileContainers) {
 				  this.applyScopedStyles(container, config);
@@ -247,18 +232,16 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async onFileSwitch(newFile: TFile, view: MarkdownView) {
 
+		console.log("FILE SWITCH ")		
 		const input = this.getChatInput();
 
 		// Save old file input
 		if (this.currentFile && this.chatInputEl) {
-			this.inputState.set(
-				this.currentFile.path,
-				this.getInputValue()
-			);
+			this.getChatNote(this.currentFile).inputCache = this.getInputValue();
 		}
 
 		// return if new file is not a chat file
-		if (!newFile || !isChatFile(this.app, newFile)) {
+		if (!newFile || !this.getIsChatNote(newFile)) {
 			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 			input.style.display = "none";
 			this.resizeObserver?.disconnect();
@@ -268,10 +251,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// restore new file input if present
 		this.currentFile = newFile
-		const saved = this.inputState.get(newFile.path) ?? "";
+		const saved = this.getChatNote(newFile).inputCache ?? "";
 		this.setInputValue(saved);
 
-		// add scroll buttons to chat file
+		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
 
 		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
@@ -292,22 +275,22 @@ export default class ChatNotesPlugin extends Plugin {
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const newFrontmatter = cache?.frontmatter;
-		const oldFrontmatter = this.frontmatterCache.get(file.path);
-	
+		const oldFrontmatter = this.getChatNote(file).yamlCache;
+
 		// check if YAML was actually changed (event is also triggered by file writes)
 		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return; 
 		if (!newFrontmatter) return; // YAML was removed?
-		this.frontmatterCache.set(file.path, newFrontmatter);
 		if (!(file instanceof TFile)) return;
+		this.getChatNote(file).yamlCache = newFrontmatter;
 
 		console.log("metadata change")
 
 		// safe new config metadata changes to cache
-		this.prepareFileConfig(file);
+		this.updateFileConfig(file);
 		
+		const previousStatus = this.getChatNote(file).isChatNote;
 		const currentStatus = isChatFile(this.app, file);
-		const previousStatus = this.chatFileState.get(file.path);
-		this.chatFileState.set(file.path, currentStatus);
+		this.getChatNote(file).isChatNote = currentStatus;
 
 		if (currentStatus && (currentStatus === previousStatus)) {
 			// chat file YAML was changed -> apply styles
@@ -334,43 +317,12 @@ export default class ChatNotesPlugin extends Plugin {
 
 	getChatInput(): HTMLElement {
 		if (!this.chatInputEl) {
-			this.chatInputEl = this.createChatInput();
+			const result = createChatInput(this);
+			this.chatInputEl = result.container;
+			this.chatTextareaEl = result.textarea;
 		}
+	
 		return this.chatInputEl;
-	}
-
-	// TODO: move to UI?
-	createChatInput(): HTMLElement {
-		const container = createDiv("chat-input-container");
-	
-		this.chatTextareaEl = container.createEl("textarea", {
-			cls: "chat-input"
-		});
-	
-		this.chatTextareaEl.oninput = () => {
-			if (this.currentFile) {
-				this.inputState.set(this.currentFile.path, this.chatTextareaEl.value);
-			}
-		};
-	
-		const button = container.createEl("button");
-		button.className = "chat-send-button";
-		setIcon(button, "send");
-	
-		button.onclick = async () => {
-			const file = this.app.workspace.getActiveFile();
-			if (!file || !isChatFile(this.app, file)) return;
-	
-			const value = this.chatTextareaEl.value.trim();
-			if (!value) return;
-	
-			await this.appendMessage(file, value);
-	
-			this.setInputValue("");
-			this.inputState.set(file.path, "");
-		};
-	
-		return container;
 	}
 
 	updateChatInputPosition(view: MarkdownView) {
@@ -399,6 +351,7 @@ export default class ChatNotesPlugin extends Plugin {
 		await this.app.vault.append(file, "msg.toString()");
 
 		// get view? Scroll down when sending new message?
+		// -> either get all views of open files and scroll down in all of them of this given file, or just dont scroll at all and user can use the buttons
 		scrollDocument(null, "bottom")
 	}
 
@@ -456,25 +409,21 @@ export default class ChatNotesPlugin extends Plugin {
 
 	updateAllFileConfigs() {
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			this.prepareFileConfig(file);
+			this.updateFileConfig(file);
 		}
 	}
 
 	refreshOpenFiles() {
-		const openFiles = new Set<string>();
-
+		const openFiles = new Set<TFile>();
+	
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.view instanceof MarkdownView && leaf.view.file) {
-				openFiles.add(leaf.view.file.path);
+				openFiles.add(leaf.view.file);
 			}
 		});
-
-		for (const path of openFiles) {
-			const file = this.app.vault.getAbstractFileByPath(path);
-			if (file instanceof TFile) {
-				void this.refreshFile(file);
-				this.updateChatInputPosition(view);
-			}
+	
+		for (const file of openFiles) {
+			void this.refreshFile(file); 	// updateChatInputPosition is called inside 
 		}
 	}
 
@@ -489,15 +438,18 @@ export default class ChatNotesPlugin extends Plugin {
 			if (view.file?.path !== file.path) continue;
 	
 			if (view.getMode() === "preview") {
+				// preview = reading mode
 				view.previewMode.rerender(true);
 			} else {
-				// editor in live preview (source mode)
+				// editor in live preview (or source mode)
 				type RebuildableLeaf = WorkspaceLeaf & {
 					rebuildView: () => Promise<void>;
 				};
 				
 				await (leaf as RebuildableLeaf).rebuildView();
 			}
+
+			this.updateChatInputPosition(view);
 		}
 	}
 	
@@ -517,7 +469,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	applyScopedStyles(container: HTMLElement, config: ChatConfig) {
 
-		console.log(container)
+		// console.log(container)
 		if (!config.messageBgColor) return; // replace with set to default?
 		container.style.setProperty(
 		  "--settings-msg-bg-color",
@@ -551,5 +503,39 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
+    getChatNote(file: TFile): ChatNote {
+		// returns the existing ChatNote or creates a new empty one
+
+        let note = this.chatNotes.get(file);
+
+        if (!note) {
+            note = new ChatNote(file);
+            this.chatNotes.set(file, note);
+        }
+
+        return note;
+    }
+
+	getChatNoteConfigCache(file: TFile){
+		// helper method to avoid checking if configCash is undefined or not
+		let config = this.getChatNote(file).configCache;
+		if (config === undefined){
+			config = this.updateFileConfig(file);
+			if (config === undefined) {
+				throw Error("unexpected Error: File could not update config. File might not be a TFile")
+			} 
+		}
+		return config;
+	}
+
+	getIsChatNote(file: TFile): boolean {
+		const note = this.getChatNote(file);
+
+		if (note.isChatNote === undefined){
+			note.isChatNote = isChatFile(this.app, file);
+		}
+
+		return note.isChatNote;
+	}
 }
 

@@ -1,16 +1,55 @@
 import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
-import { scrollDocument } from "./util"
+import { isChatFile, scrollDocument } from "./util"
+import type ChatNotesPlugin from "./main";
+
+
+export function createChatInput(plugin: ChatNotesPlugin) {
+	const container = createDiv("chat-input-container");
+
+	const textarea = container.createEl("textarea", {
+		cls: "chat-input"
+	});
+
+	textarea.oninput = () => {
+		if (plugin.currentFile) {
+			plugin.getChatNote(plugin.currentFile).inputCache = textarea.value;
+		}
+	};
+
+	const button = container.createEl("button");
+	button.className = "chat-send-button";
+	setIcon(button, "send");
+
+	button.onclick = async () => {
+		const file = plugin.app.workspace.getActiveFile();
+		if (!file || !plugin.getIsChatNote(file)) return;
+
+		const value = textarea.value.trim();
+		if (!value) return;
+
+		await plugin.appendMessage(file, value);
+
+		textarea.value = "";
+		plugin.getChatNote(file).inputCache = "";
+	};
+
+	return {
+		container,
+		textarea
+	};
+}
 
 
 export function addScrollButtons(view: MarkdownView) {
+	
 	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 	if (!view) return;
 
 	// Avoid adding multiple times
-	if ((view as any)._myButtonAdded) return;
-	(view as any)._myButtonAdded = true;
+	if ((view as any)._scrollButtonAdded) return;
+	(view as any)._scrollButtonAdded = true;
 
 	view.addAction("arrow-up", "Scroll to top", (evt) => {
 		scrollDocument(view, "top")
@@ -21,11 +60,10 @@ export function addScrollButtons(view: MarkdownView) {
 	});
 }
 
-
+/**
+Create HTML elements for messages
+*/
 export function createElementsHTML({plugin, ctx, source, author_text, timestamp_text, onToggle} : CreateHTMLParams){
-	/*
-	Create Message HTML Elements
-	*/
 
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
@@ -42,7 +80,7 @@ export function createElementsHTML({plugin, ctx, source, author_text, timestamp_
 		onToggle
 	});
 
-	/* Create Header and add menu buttons to Header */
+	/* Create message header and add menu buttons to header */
 	const header = createMessageHeader(`${author_text}`, `${timestamp_text}`, menu);
 	wrapper.append(header, content);
 
@@ -61,7 +99,6 @@ function createMessageActionsMenu({
 	onToggle,
 } : CreateMenuParams) {
 	
-
     const filePath = ctx.sourcePath;
 	const app = plugin.app;
 
@@ -97,7 +134,6 @@ function createMessageActionsMenu({
 	buttonContainer.append(editBtn, deleteBtn, copyBtn, menuBtn);
 	menu.append(buttonContainer, menuBtn)
 
-
     /* ---------------- COPY ---------------- */
     copyBtn.addEventListener("click", () => {
 		void (async () => {
@@ -107,7 +143,6 @@ function createMessageActionsMenu({
 
 		})();
     });
-
 
     /* ---------------- DELETE ---------------- */
 	deleteBtn.addEventListener("click", (e) => {
@@ -309,6 +344,7 @@ function createMessageActionsMenu({
 };
 
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
+
 	const header = document.createElement("div");
 	header.className = "msg-header";
 

@@ -1,4 +1,4 @@
-import { MarkdownPostProcessorContext, FrontMatterCache} from "obsidian";
+import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig } from "./settings";
 import ChatNotesPlugin from "./main"
 
@@ -105,14 +105,13 @@ export class Message {
 	}
 }
 
-export class File{
+export class ChatNote {
 	constructor(
-		public path: string,
-		public isChatNote: boolean,
-		public inputState: string,
-		public settingsCache: ChatConfig,
-		public yamlCache: FrontMatterCache,
-		public HTMLContainers: Set<HTMLElement>
+		public file: TFile,
+		public isChatNote?: boolean,
+		public inputCache?: string,
+		public configCache?: ChatConfig,
+		public yamlCache?: FrontMatterCache
 	) {}
 
 }
