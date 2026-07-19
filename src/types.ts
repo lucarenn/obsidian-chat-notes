@@ -111,7 +111,8 @@ export class ChatNote {
 		public isChatNote?: boolean,
 		public inputCache?: string,
 		public configCache?: ChatConfig,
-		public yamlCache?: FrontMatterCache
+		public yamlCache?: FrontMatterCache,
+		public lastAppliedConfig?: ChatConfig
 	) {}
 
 }

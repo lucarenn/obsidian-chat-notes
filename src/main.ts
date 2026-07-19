@@ -38,6 +38,7 @@ export default class ChatNotesPlugin extends Plugin {
 		await this.loadSettings();
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
+
 		document.addEventListener("click", (event) => {
 			// on CLICK ANYWHERE
 			/* Detect clicks outside a message action menu and closes the current open menu */
@@ -137,7 +138,11 @@ export default class ChatNotesPlugin extends Plugin {
 				el.appendChild(wrapper);
 
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
-				this.applyConfigStylesToFile(file);
+				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
+				if (note.lastAppliedConfig !== note.configCache) {
+					this.applyConfigStylesToFile(file);
+					note.lastAppliedConfig = note.configCache;
+				}
 
 				// Render message content as markdown
 				await MarkdownRenderer.render(
@@ -167,7 +172,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	getActiveContainers(file: TAbstractFile){
 		// get all html containers of the given file (multiple depending on mode and if the file is opened multiple times) 
-		console.log("GATHERING ALL ACTIVE HTML CONTAINERS -------------------------------")
+
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
 
 		const containers = []
@@ -203,6 +208,7 @@ export default class ChatNotesPlugin extends Plugin {
 	applyConfigStylesToFile(file: TFile){
 		// get all html containers of the open file and call applyScopedStyles on them with their current config
 
+		console.log("applying styles to containers")
 		const allContainers = this.getActiveContainers(file)
 		if (!allContainers) return;
 		const config = this.getChatNoteConfigCache(file)!;
@@ -521,6 +527,7 @@ export default class ChatNotesPlugin extends Plugin {
 		let config = this.getChatNote(file).configCache;
 		if (config === undefined){
 			config = this.updateFileConfig(file);
+			this.getChatNote(file).configCache = config;
 			if (config === undefined) {
 				throw Error("unexpected Error: File could not update config. File might not be a TFile")
 			} 
