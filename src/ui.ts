@@ -63,7 +63,7 @@ export function addScrollButtons(view: MarkdownView) {
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, source, author_text, timestamp_text, onToggle} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, onToggle, onHighlight} : CreateHTMLParams){
 
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
@@ -74,14 +74,15 @@ export function createElementsHTML({plugin, ctx, source, author_text, timestamp_
 	const { menu } = createMessageActionsMenu({
 		plugin,
 		ctx,
-		source,
+		msg,
 		wrapper,
 		content,
-		onToggle
+		onToggle,
+		onHighlight
 	});
 
 	/* Create message header and add menu buttons to header */
-	const header = createMessageHeader(`${author_text}`, `${timestamp_text}`, menu);
+	const header = createMessageHeader(`${author_text}`, `${msg.header.timestamp}`,  menu);
 	wrapper.append(header, content);
 
 	return {
@@ -93,10 +94,11 @@ export function createElementsHTML({plugin, ctx, source, author_text, timestamp_
 function createMessageActionsMenu({
 	plugin,
 	ctx,
-	source,
+	msg,
 	wrapper,
 	content,
 	onToggle,
+	onHighlight
 } : CreateMenuParams) {
 	
     const filePath = ctx.sourcePath;
@@ -134,6 +136,10 @@ function createMessageActionsMenu({
 	const favBtn = document.createElement("button");
 	favBtn.className = "msg-action-btn msg-fav-btn";
 	setIcon(favBtn, "pin");
+	favBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		onHighlight(msg.header.id, true);
+	});
 
 	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
 	menu.append(buttonContainer, menuBtn)
@@ -141,7 +147,6 @@ function createMessageActionsMenu({
     /* ---------------- COPY ---------------- */
     copyBtn.addEventListener("click", () => {
 		void (async () => {
-			const msg = Message.fromString(source);
 			await navigator.clipboard.writeText(msg.content);
 			new Notice("Copied message");
 

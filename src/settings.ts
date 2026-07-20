@@ -102,11 +102,13 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const fm = cache?.frontmatter;
   
 	if (!fm) return {};
-  
+  	
+	// set variable names for the yaml overrides here:
 	return {
 		chatId: fm.chatId,
 		author: fm.author,
-		messageBgColor: fm.messageBgColor,
+		messageBgColor: fm.msgColor,
+		messageHighlightColor: fm.msgPinColor
 	};
 }
 

@@ -20,3 +20,22 @@ export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
 		preview.scrollTop = position === "top" ? 0 : preview.scrollHeight;
 	}
 }
+
+export function extractMessageIdFromSource(source: string): string {
+	const newline = source.indexOf("\n");
+	const firstLine = newline === -1 ? source : source.slice(0, newline);
+
+	const colon = firstLine.indexOf(":");
+	if (colon === -1) {
+		throw new Error("Missing ':' in first line.");
+	}
+
+	const identifier = firstLine.slice(0, colon).trim();
+	const value = firstLine.slice(colon + 1).trim();
+
+	if (identifier !== "id" || !value) {
+		throw new Error("First line must be 'id: ...'");
+	}
+
+	return value;
+}

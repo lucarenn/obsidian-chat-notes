@@ -1,8 +1,9 @@
 import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf, Notice, TAbstractFile } from "obsidian";
-import { Message, Header, ChatNote } from "./types"
+import { Message, Header, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput } from "./ui"
-import { isChatFile, scrollDocument } from "./util"
+import { isChatFile, scrollDocument, extractMessageIdFromSource} from "./util"
+import { PassThrough } from "stream";
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -13,8 +14,10 @@ export default class ChatNotesPlugin extends Plugin {
 	resizeObserver: ResizeObserver | null = null;
 	currentFile: TFile | null = null;
 
-	private chatNotes = new WeakMap<TFile, ChatNote>();
-	
+	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
+	// use path as ID, because mutliple
+	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
+
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
@@ -27,6 +30,84 @@ export default class ChatNotesPlugin extends Plugin {
 		const resolved = resolveConfig(this.settings, overrides);
 		this.getChatNote(file).configCache = resolved;
 		return resolved;
+	}
+
+	async createArchiveContext(file: TFile): Promise<ArchiveContext> {
+
+		if (!(file instanceof TFile)) {
+			throw new Error("Not a file");
+		}
+		if (!isChatFile(this.app, file)){
+			throw new Error("File is not a ChatNote");
+		}
+	
+		const source = await this.app.vault.read(file);
+		const messages = this.parseMessages(source);
+	
+		return new ArchiveContext(
+			file,
+			messages
+		);
+	}
+
+	parseMessages(source: string): Map<string, MessageEntry> {
+
+		const messages = new Map<string, MessageEntry>();
+		const lines = source.split("\n");
+		let insideBlock = false;
+		let currentBlock: string[] = [];
+		let currentStartLine = 0;
+		let currentLastLine = -1;
+
+		for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+			const line = lines[lineNumber];
+			if (!line) continue;
+	
+			// Start of chat-message block
+			if (!insideBlock && line.trim() === "````chat-message") {
+				insideBlock = true;
+				currentBlock = [];
+				currentStartLine = lineNumber;
+				continue;
+			}
+	
+			// End of codeblock
+			if (insideBlock && line.trim() === "````") {
+	
+				insideBlock = false;
+				currentLastLine = lineNumber;
+	
+				try {
+					const rawMessage = currentBlock.join("\n");
+					const message = Message.fromString(rawMessage);
+	
+					messages.set(
+						message.header.id,
+						{
+							id: message.header.id,
+							message,
+							startLine: currentStartLine,
+							endLine: currentLastLine
+						}
+					);
+	
+				} catch (e) {
+					console.warn(
+						"Failed to parse chat message",
+						e
+					);
+				}
+	
+				continue;
+			}
+	
+			// Collect message contents
+			if (insideBlock) {
+				currentBlock.push(line);
+			}
+		}
+	
+		return messages;
 	}
 
 	async onload() {
@@ -81,7 +162,9 @@ export default class ChatNotesPlugin extends Plugin {
 			/* Detect yaml changes and refresh/rerender the file if the settings are overridden or it becomes or is no longer a chat note */
 
 			this.app.metadataCache.on("changed", (file) => {
-				this.onYAMLChange(file);
+				void this.onYAMLChange(file).catch(err => {
+					console.error("Failed to handle YAML change", err);
+				});
 			})
 		);
 
@@ -101,9 +184,6 @@ export default class ChatNotesPlugin extends Plugin {
 				: null;
 				if (!(file instanceof TFile)) return;
 
-				const note = this.getChatNote(file);
-				const config = this.getChatNoteConfigCache(file);
-
 				// Only render if the file has type: chat in yaml properties
 				if (!this.getIsChatNote(file)) {
 					// for now fallback render for non chat notes.
@@ -121,22 +201,28 @@ export default class ChatNotesPlugin extends Plugin {
 					return;
 				}
 
-				// Parse codeblock to message
-				const msg = Message.fromString(source);
+				const context = await this.getArchiveContext(file);
+				const id = extractMessageIdFromSource(source);
+				const entry = context.messageMap.get(id);		// get the context entry for this message
+				if (!entry) throw new Error("Error, message entry not found in archiveContext");
+				const msg = entry.message
+				const note = this.getChatNote(file);
+				const config = this.getConfigCache(file);
 
 				// Create HTML structure for message
 				const {wrapper, content} = createElementsHTML({
 					plugin: this,
 					ctx,
-					source,
+					msg,
 					author_text: msg.header.author ?? config.author,
-					timestamp_text: msg.header.timestamp,
-					onToggle: this.handleMenuToggle.bind(this)
+					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
+					onHighlight: this.handleMessageHighlight.bind(this)		// callback for the highlight/pin button
 				});
 				
 				// attach message to file html container
 				el.appendChild(wrapper);
-
+				entry.element = wrapper;
+				
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
 				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
 				if (note.lastAppliedConfig !== note.configCache) {
@@ -144,9 +230,13 @@ export default class ChatNotesPlugin extends Plugin {
 					note.lastAppliedConfig = note.configCache;
 				}
 
-				// if the message is highlighted
-				if (msg.header.extra.pinned === "true"){
-					// check if its in the 
+				// highlight message if its pinned
+				if (entry.message.header.extra.pinned === "true") {
+					this.applyMessageHighlightStyle(
+						entry.element,
+						this.getConfigCache(this.currentFile!),
+						true
+					)
 				}
 
 				// Render message content as markdown
@@ -170,6 +260,8 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		  });
 	}
+
+
 
 	onunload() {
 		this.chatInputEl?.remove();
@@ -216,7 +308,7 @@ export default class ChatNotesPlugin extends Plugin {
 		console.log("applying styles to containers")
 		const allContainers = this.getActiveContainers(file)
 		if (!allContainers) return;
-		const config = this.getChatNoteConfigCache(file)!;
+		const config = this.getConfigCache(file)!;
 		for (const fileContainers of allContainers) {
 			for (const container of fileContainers) {
 				  this.applyScopedStyles(container, config);
@@ -282,7 +374,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	onYAMLChange(file: TFile){
+	async onYAMLChange(file: TFile){
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const newFrontmatter = cache?.frontmatter;
@@ -307,7 +399,15 @@ export default class ChatNotesPlugin extends Plugin {
 			// chat file YAML was changed -> apply styles
 			// TODO: detect and update other new settings (not just styles)
 
-			this.applyConfigStylesToFile(file);
+			const context = await this.getArchiveContext(file);
+			if (context.pinnedMessagesAmount === 0) {
+				console.log("Container based Styling")
+				this.applyConfigStylesToFile(file);
+			} else {
+				
+				console.log("Message based Styling")
+				context.refreshStylesPerMessage(this.getConfigCache(file));
+			}
 
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
@@ -377,11 +477,66 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	handleMessageHighlight(){
-		// apply/remove css
-		// add/remove msg from pinned list
+	async handleMessageHighlight(msgId: string, isPinned: boolean){
+
+		if (!this.currentFile) throw new Error("Current file is not set");
+		const config = this.getConfigCache(this.currentFile);
+		const context = await this.getArchiveContext(this.currentFile);
+		const entry = context.getEntry(msgId);
+		const msg = entry.message
+
+		const el = entry.element
+		if (!el) throw new Error("Rendered element missing.");
+
+		const pinState = !(msg.header.extra.pinned === "true")
+		// message is now being unpinned
+		this.applyMessageHighlightStyle(el, config, pinState);
+		// update context
+		msg.header.extra.pinned = `${pinState}`;
+		await this.setMessageHeaderPinned(this.currentFile, entry, pinState);  // this triggers CBP
+
+		if (pinState){
+			context.pinnedMessagesAmount += 1
+		} else {
+			context.pinnedMessagesAmount -= 1
+		}
+
 	}
 
+	async setMessageHeaderPinned(file: TFile, entry: MessageEntry, pinned: boolean) {
+
+		const content = await this.app.vault.read(file);
+		const lines = content.split("\n");
+		const start = entry.startLine;
+
+		const headerEnd = lines.indexOf(
+			"~~~",
+			start + 1
+		);
+
+		const headerLines = lines.slice(start, headerEnd);
+		const pinnedLine = headerLines.findIndex(
+			line => line.startsWith("pinned:")
+		);
+	
+		if (pinnedLine !== -1) {
+			lines[start + pinnedLine] =
+				`pinned: ${pinned}`;
+		} else {
+			// add it before ~~~
+			lines.splice(
+				headerEnd,
+				0,
+				`pinned: ${pinned}`
+			);
+		}
+	
+		// this will trigger the CodeBlockProcessor to rerun
+		await this.app.vault.modify(
+			file,
+			lines.join("\n")
+		);
+	}
 
 	handleOpenEditor(newEditor: {
 		container: HTMLElement;
@@ -499,23 +654,24 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 
 		if (config.enableButtonShadow) {
-			console.log("Enabled Shadows")
 			container.classList.remove("menu-btn-no-shadow");
 		} else {
-			console.log("Enabled Shadows")
 			container.classList.add("menu-btn-no-shadow");
 		}
 	}
 
-	
-	applyMessageHighlightStyle(msg: HTMLElement, config: ChatConfig){
+	applyMessageHighlightStyle(msg: HTMLElement, config: ChatConfig, isPinned: boolean){
 		// override the background color for highlighted Messages
-		
-		// console.log(container)
-		if (!config.messageHighlightColor) return; // replace with set to default value?
+
+		const color = isPinned
+			? config.messageHighlightColor
+			: config.messageBgColor;
+	
+		if (!color) return;
+
 		msg.style.setProperty(
 			"--settings-msg-bg-color",
-			config.messageHighlightColor
+			color
 		);
 	}
 
@@ -553,7 +709,7 @@ export default class ChatNotesPlugin extends Plugin {
         return note;
     }
 
-	getChatNoteConfigCache(file: TFile){
+	getConfigCache(file: TFile){
 		// helper method to avoid checking if configCash is undefined or not
 		let config = this.getChatNote(file).configCache;
 		if (config === undefined){
@@ -575,5 +731,24 @@ export default class ChatNotesPlugin extends Plugin {
 
 		return note.isChatNote;
 	}
+
+	private async getArchiveContext(file: TFile): Promise<ArchiveContext> {
+
+ 		// promise because CBP works asynchronously, otherwise it will calculate it for multiple messages
+		let contextPromise = this.archiveContexts.get(file.path);
+		if (!contextPromise) {
+			// lazy context initialization
+			// -> scan the whole file and establish context
+			console.log("generating context:", file.path);
+			contextPromise = this.createArchiveContext(file);
+			this.archiveContexts.set(
+				file.path,
+				contextPromise
+			);
+		}
+
+		return contextPromise;
+	}
+
 }
 

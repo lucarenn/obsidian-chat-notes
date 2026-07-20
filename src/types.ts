@@ -2,27 +2,84 @@ import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig } from "./settings";
 import ChatNotesPlugin from "./main"
 
+
+export class ArchiveContext {
+    file: TFile;
+	// messages: MessageEntry[];
+	messageMap: Map<string, MessageEntry>
+    renderedElements: Map<string, HTMLElement>;
+	pinnedMessagesAmount: number;
+
+    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>) {
+        this.file = file;
+		// this.messages = msgEntries;
+        this.messageMap = msgEntryMap;
+		this.renderedElements = new Map();
+		this.pinnedMessagesAmount = 0;
+    }
+
+	getEntry(id: string): MessageEntry {
+        const entry = this.messageMap.get(id);
+        if (!entry) throw new Error(`Message Entry  ${id} not found.`);
+        return entry;
+    }
+
+	refreshStylesPerMessage(config: ChatConfig) {
+
+		for (const entry of this.messageMap.values()) {
+	
+			if (!entry.element)
+				continue;
+	
+			const pinned =
+				entry.message.header.extra.pinned === "true";
+	
+			const color = pinned
+				? config.messageHighlightColor
+				: config.messageBgColor;
+		
+			if (!color) return;
+	
+			entry.element.style.setProperty(
+				"--settings-msg-bg-color",
+				color
+			);
+		}
+	}
+
+}
+
+export interface MessageEntry {
+	id: string;
+	message: Message;
+	startLine: number;
+	endLine: number;
+	element?: HTMLElement;
+}
+
 export type CreateHTMLParams = {
     plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
-	source: string;
+	msg: Message;
 	author_text: string;
-	timestamp_text: string;
 	onToggle: (menu: HTMLElement) => void;
+	onHighlight: (msgId: string, isPinned: boolean) => void;
 };
 
 export type CreateMenuParams = {
     plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
-	source: string;
+	msg: Message;
 	wrapper: HTMLElement;
 	content: HTMLDivElement;
 	onToggle: (menu: HTMLElement) => void;
+	onHighlight: (msgId: string, isPinned: boolean) => void;
 };
 
 
 export class Header {
 	constructor(
+		public id: string,
 		public author: string,
 		public timestamp: string,
 		public extra: Record<string, string> = {}   // for adding addional fields
@@ -38,7 +95,13 @@ export class Header {
 			data[key.trim()] = rest.join(":").trim();
 		}
 
+		const id = data["id"];
+		if (id === undefined || id === ""){
+			throw new Error("Message Header contains no ID.")
+		}
+
 		return new Header(
+			id,
 			data["author"] ?? "",
 			data["timestamp"] ?? "",
 			Object.fromEntries(
@@ -51,6 +114,7 @@ export class Header {
 
 	toString(): string {
 		const base = [
+			`id: ${this.id}`,
 			`author: ${this.author}`,
 			`timestamp: ${this.timestamp}`,
 		];
@@ -76,6 +140,7 @@ export class Message {
     }
 
 	static fromString(rawMessage: string): Message {
+		// expxts rawMessage to NOT contain the codeblock seperators (````chat-message and ````)
 		const lines = rawMessage.trim().split("\n");
 
 		// find header/content separator
@@ -113,7 +178,11 @@ export class ChatNote {
 		public configCache?: ChatConfig,
 		public yamlCache?: FrontMatterCache,
 		public lastAppliedConfig?: ChatConfig,
-		public pinnedMessages?: Set<string>,
+
+		public lastId?: number,
+		public lastAuthor?: string,
+		public chatAuthor?: string,
+
 	) {}
 
 }
