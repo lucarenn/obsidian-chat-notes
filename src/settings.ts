@@ -11,6 +11,7 @@ export interface ChatConfig {
     messageCornerRadius?: number;
 	chatId?: string;
 	author?: string;
+	messageHighlightColor?: string;
 	// add future settings here
 }
 
@@ -19,12 +20,16 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	messageBgColor: string;
 	enableButtonShadow: boolean;
     messageCornerRadius: number;
+	messageHighlightColor: string;
+	// specify the variables that should appear in global settings
 }
 
 export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageBgColor: "#6d54b1",
 	enableButtonShadow: true,
 	messageCornerRadius: 12,
+	messageHighlightColor: "#e0adf0",
+	// add default values here
 };
 
 
@@ -51,6 +56,18 @@ export class ChatNotesSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     });
             });
+
+		new Setting(containerEl)
+		.setName("Message highlight color")
+		.setDesc("Determines the background color of a highlighted/pinned message")
+		.addColorPicker(color => {
+			color
+				.setValue(this.plugin.settings.messageHighlightColor)
+				.onChange(async (value) => {
+					this.plugin.settings.messageHighlightColor = value;
+					await this.plugin.saveSettings();
+				});
+		});
 
 		new Setting(containerEl)
 		.setName("Enable button shadow")

@@ -125,7 +125,7 @@ export default class ChatNotesPlugin extends Plugin {
 				const msg = Message.fromString(source);
 
 				// Create HTML structure for message
-				const {wrapper, content } = createElementsHTML({
+				const {wrapper, content} = createElementsHTML({
 					plugin: this,
 					ctx,
 					source,
@@ -142,6 +142,11 @@ export default class ChatNotesPlugin extends Plugin {
 				if (note.lastAppliedConfig !== note.configCache) {
 					this.applyConfigStylesToFile(file);
 					note.lastAppliedConfig = note.configCache;
+				}
+
+				// if the message is highlighted
+				if (msg.header.extra.pinned === "true"){
+					// check if its in the 
 				}
 
 				// Render message content as markdown
@@ -372,6 +377,12 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
+	handleMessageHighlight(){
+		// apply/remove css
+		// add/remove msg from pinned list
+	}
+
+
 	handleOpenEditor(newEditor: {
 		container: HTMLElement;
 		restore: () => void;
@@ -476,7 +487,7 @@ export default class ChatNotesPlugin extends Plugin {
 	applyScopedStyles(container: HTMLElement, config: ChatConfig) {
 
 		// console.log(container)
-		if (!config.messageBgColor) return; // replace with set to default?
+		if (!config.messageBgColor) return; // replace with set to default value?
 		container.style.setProperty(
 		  "--settings-msg-bg-color",
 		  config.messageBgColor
@@ -485,6 +496,26 @@ export default class ChatNotesPlugin extends Plugin {
 		container.style.setProperty(
 		  "--settings-msg-corner-radius",
 		  `${config.messageCornerRadius}px`
+		);
+
+		if (config.enableButtonShadow) {
+			console.log("Enabled Shadows")
+			container.classList.remove("menu-btn-no-shadow");
+		} else {
+			console.log("Enabled Shadows")
+			container.classList.add("menu-btn-no-shadow");
+		}
+	}
+
+	
+	applyMessageHighlightStyle(msg: HTMLElement, config: ChatConfig){
+		// override the background color for highlighted Messages
+		
+		// console.log(container)
+		if (!config.messageHighlightColor) return; // replace with set to default value?
+		msg.style.setProperty(
+			"--settings-msg-bg-color",
+			config.messageHighlightColor
 		);
 	}
 

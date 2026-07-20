@@ -1,10 +1,5 @@
 
-
 :root {
-    /* get from settings: */
-    --msg-bg-color: var(--settings-msg-bg-color, var(--color-base-20));   /* #57966f */
-    --editor-bg-color: color-mix(in srgb, var(--msg-bg-color) 82%, black);    /* Editor bg color = message bg color just darker */
-    --msg-corner-radius: var(--settings-msg-corner-radius, 12px);
     --msg-border-color: #ffffff3d;
 }
 
@@ -22,19 +17,19 @@
     padding-right: 22px;
 
     margin: 10px 0;
-    border-radius: var(--msg-corner-radius);
+    border-radius:  var(--settings-msg-corner-radius, 12px) !important;
     max-width: 100%;
-    background-color: var(--msg-bg-color) !important;  
+    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;  
 
     border: 1px solid var(--msg-border-color);
 }
 
 .markdown-reading-view .chat-message
 {
-    background-color: var(--settings-msg-bg-color) !important;
+    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
 }
 .markdown-source-view.mod-cm6 .chat-message {
-    background-color: var(--settings-msg-bg-color) !important;
+    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
 }
 
 
@@ -129,7 +124,7 @@
 
 .msg-action-btn {
     border: none;
-    background-color: var(--msg-bg-color) !important;
+    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
     background: var(--background-modifier-hover);
     border-radius: 4px;
     padding: 0px 6px;
@@ -137,7 +132,7 @@
 }
 
 /* turn off shadow via settings*/
-body.menu-btn-no-shadow .msg-action-btn {
+.menu-btn-no-shadow .msg-action-btn {
 	box-shadow: none !important;
 }
 
@@ -169,7 +164,7 @@ body.menu-btn-no-shadow .msg-action-btn {
     border: none;
     outline: none;
     box-shadow: none;
-    background: var(--editor-bg-color);
+    background: color-mix(in srgb, var(--settings-msg-bg-color, var(--color-base-20)) 82%, black);
     font-family: var(--font-monospace);
     padding: 6px;
 }
@@ -177,13 +172,13 @@ body.menu-btn-no-shadow .msg-action-btn {
 .msg-inline-editor:focus {
     outline: none;
     box-shadow: none;
-    background: var(--editor-bg-color);
+    background: color-mix(in srgb, var(--settings-msg-bg-color, var(--color-base-20)) 82%, black);
 }
 
 .msg-inline-editor:hover {
     outline: none;
     box-shadow: none;
-    background: color-mix(in srgb, var(--editor-bg-color) 70%, var(--msg-bg-color));
+    background: color-mix(in srgb, color-mix(in srgb, var(--settings-msg-bg-color, var(--color-base-20)) 82%, black) 70%, var(--settings-msg-bg-color, var(--color-base-20)));
 }
 
 .msg-editor-wrapper {

@@ -131,7 +131,11 @@ function createMessageActionsMenu({
 		onToggle(menu);
 	});
 
-	buttonContainer.append(editBtn, deleteBtn, copyBtn, menuBtn);
+	const favBtn = document.createElement("button");
+	favBtn.className = "msg-action-btn msg-fav-btn";
+	setIcon(favBtn, "pin");
+
+	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
 	menu.append(buttonContainer, menuBtn)
 
     /* ---------------- COPY ---------------- */

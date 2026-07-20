@@ -112,7 +112,8 @@ export class ChatNote {
 		public inputCache?: string,
 		public configCache?: ChatConfig,
 		public yamlCache?: FrontMatterCache,
-		public lastAppliedConfig?: ChatConfig
+		public lastAppliedConfig?: ChatConfig,
+		public pinnedMessages?: Set<string>,
 	) {}
 
 }
