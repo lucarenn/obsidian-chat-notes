@@ -1,7 +1,7 @@
 import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
-import { isChatFile, scrollDocument } from "./util"
+import { scrollDocument } from "./util"
 import type ChatNotesPlugin from "./main";
 
 

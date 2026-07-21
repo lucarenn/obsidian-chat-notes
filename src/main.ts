@@ -1,9 +1,8 @@
-import { Plugin, MarkdownRenderer, setIcon, TFile, MarkdownView, WorkspaceLeaf, Notice, TAbstractFile } from "obsidian";
-import { Message, Header, ChatNote, ArchiveContext, MessageEntry } from "./types"
+import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile } from "obsidian";
+import { Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource} from "./util"
-import { PassThrough } from "stream";
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers } from "./util"
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -15,7 +14,6 @@ export default class ChatNotesPlugin extends Plugin {
 	currentFile: TFile | null = null;
 
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
-	// use path as ID, because mutliple
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
 
 	activeEditor: {
@@ -23,14 +21,6 @@ export default class ChatNotesPlugin extends Plugin {
 		restore: () => void;
 	} | null = null;
 
-	updateFileConfig(file: TAbstractFile) {
-		// update and store config cache for a file
-		if (!(file instanceof TFile)) return;
-		const overrides = getFileOverrides(this.app, file);
-		const resolved = resolveConfig(this.settings, overrides);
-		this.getChatNote(file).configCache = resolved;
-		return resolved;
-	}
 
 	async createArchiveContext(file: TFile): Promise<ArchiveContext> {
 
@@ -42,72 +32,12 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	
 		const source = await this.app.vault.read(file);
-		const messages = this.parseMessages(source);
+		const messages = parseMessages(source);
 	
 		return new ArchiveContext(
 			file,
 			messages
 		);
-	}
-
-	parseMessages(source: string): Map<string, MessageEntry> {
-
-		const messages = new Map<string, MessageEntry>();
-		const lines = source.split("\n");
-		let insideBlock = false;
-		let currentBlock: string[] = [];
-		let currentStartLine = 0;
-		let currentLastLine = -1;
-
-		for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-			const line = lines[lineNumber];
-			if (!line) continue;
-	
-			// Start of chat-message block
-			if (!insideBlock && line.trim() === "````chat-message") {
-				insideBlock = true;
-				currentBlock = [];
-				currentStartLine = lineNumber;
-				continue;
-			}
-	
-			// End of codeblock
-			if (insideBlock && line.trim() === "````") {
-	
-				insideBlock = false;
-				currentLastLine = lineNumber;
-	
-				try {
-					const rawMessage = currentBlock.join("\n");
-					const message = Message.fromString(rawMessage);
-	
-					messages.set(
-						message.header.id,
-						{
-							id: message.header.id,
-							message,
-							startLine: currentStartLine,
-							endLine: currentLastLine
-						}
-					);
-	
-				} catch (e) {
-					console.warn(
-						"Failed to parse chat message",
-						e
-					);
-				}
-	
-				continue;
-			}
-	
-			// Collect message contents
-			if (insideBlock) {
-				currentBlock.push(line);
-			}
-		}
-	
-		return messages;
 	}
 
 	async onload() {
@@ -118,7 +48,6 @@ export default class ChatNotesPlugin extends Plugin {
 		// load global settings
 		await this.loadSettings();
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
-
 
 		document.addEventListener("click", (event) => {
 			// on CLICK ANYWHERE
@@ -261,77 +190,11 @@ export default class ChatNotesPlugin extends Plugin {
 		  });
 	}
 
-
-
 	onunload() {
 		this.chatInputEl?.remove();
 	}
 
-	getActiveContainers(file: TAbstractFile){
-		// get all html containers of the given file (multiple depending on mode and if the file is opened multiple times) 
-
-		const leaves = this.app.workspace.getLeavesOfType("markdown");
-
-		const containers = []
-		for (const leaf of leaves) {
-			const view = leaf.view;
-		
-			if (!(view instanceof MarkdownView)) continue;
-			if (view.file?.path !== file.path) continue;
-
-			// get containers for reading and preview mode
-			const fileContainers = [
-				view.previewMode?.containerEl,
-				view.contentEl,
-				// view.editor?.cm?.dom // raw CodeMirror editor DOM, needed?
-			];
-
-			// only return available containers
-			const availableFileContaiers = []
-			for (const container of fileContainers){
-				if (container instanceof HTMLElement) {
-					availableFileContaiers.push(container)
-				}
-			}
-
-			containers.push(availableFileContaiers)
-		}
-
-		if (containers.length == 0) return;
-
-		return containers;
-	}
-
-	applyConfigStylesToFile(file: TFile){
-		// get all html containers of the open file and call applyScopedStyles on them with their current config
-
-		console.log("applying styles to containers")
-		const allContainers = this.getActiveContainers(file)
-		if (!allContainers) return;
-		const config = this.getConfigCache(file)!;
-		for (const fileContainers of allContainers) {
-			for (const container of fileContainers) {
-				  this.applyScopedStyles(container, config);
-			}
-		}
-
-	}
-
-	getInputValue(): string {
-		//TODO return if not initialized?
-		const input = this.chatInputEl.querySelector("textarea, input");
-		return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
-			? input.value
-			: "";
-	}
-	
-	setInputValue(value: string) {
-		//TODO lazy initialize? -> need to get view
-		const input = this.chatInputEl.querySelector("textarea, input");
-		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
-			input.value = value;
-		}
-	}
+	/* Event Helper Methods */
 
 	async onFileSwitch(newFile: TFile, view: MarkdownView) {
 
@@ -426,14 +289,18 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	getChatInput(): HTMLElement {
-		if (!this.chatInputEl) {
-			const result = createChatInput(this);
-			this.chatInputEl = result.container;
-			this.chatTextareaEl = result.textarea;
-		}
-	
-		return this.chatInputEl;
+	setupResizeObserver(view: MarkdownView) {
+		const el = view.contentEl;
+		if (!el) return;
+	  
+		// Clean up previous observer if needed
+		this.resizeObserver?.disconnect();
+	  
+		this.resizeObserver = new ResizeObserver(() => {
+		  this.updateChatInputPosition(view);
+		});
+	  
+		this.resizeObserver.observe(el);
 	}
 
 	updateChatInputPosition(view: MarkdownView) {
@@ -453,136 +320,6 @@ export default class ChatNotesPlugin extends Plugin {
 		input.style.width = `${rect.width - margin * 2}px`;
 		input.style.left = `${offsetLeft + margin}px`;
 
-	}
-
-	async appendMessage(file: TFile, content: string) {
-		// TODO: create and save standart header for every chat? map?
-		// const chat_header = new Header();
-		// const msg = new Message(chat_header, content);
-		await this.app.vault.append(file, "msg.toString()");
-
-		// get view? Scroll down when sending new message?
-		// -> either get all views of open files and scroll down in all of them of this given file, or just dont scroll at all and user can use the buttons
-		scrollDocument(null, "bottom")
-	}
-
-	handleMenuToggle(menu: HTMLElement) {
-		if (this.openMenu && this.openMenu !== menu) {
-			this.openMenu.classList.remove("menu-open");
-		}
-
-		const isOpening = !menu.classList.contains("menu-open");
-		menu.classList.toggle("menu-open");
-		this.openMenu = isOpening ? menu : null;
-
-	}
-
-	async handleMessageHighlight(msgId: string, isPinned: boolean){
-
-		if (!this.currentFile) throw new Error("Current file is not set");
-		const config = this.getConfigCache(this.currentFile);
-		const context = await this.getArchiveContext(this.currentFile);
-		const entry = context.getEntry(msgId);
-		const msg = entry.message
-
-		const el = entry.element
-		if (!el) throw new Error("Rendered element missing.");
-
-		const pinState = !(msg.header.extra.pinned === "true")
-		// message is now being unpinned
-		this.applyMessageHighlightStyle(el, config, pinState);
-		// update context
-		msg.header.extra.pinned = `${pinState}`;
-		await this.setMessageHeaderPinned(this.currentFile, entry, pinState);  // this triggers CBP
-
-		if (pinState){
-			context.pinnedMessagesAmount += 1
-		} else {
-			context.pinnedMessagesAmount -= 1
-		}
-
-	}
-
-	async setMessageHeaderPinned(file: TFile, entry: MessageEntry, pinned: boolean) {
-
-		const content = await this.app.vault.read(file);
-		const lines = content.split("\n");
-		const start = entry.startLine;
-
-		const headerEnd = lines.indexOf(
-			"~~~",
-			start + 1
-		);
-
-		const headerLines = lines.slice(start, headerEnd);
-		const pinnedLine = headerLines.findIndex(
-			line => line.startsWith("pinned:")
-		);
-	
-		if (pinnedLine !== -1) {
-			lines[start + pinnedLine] =
-				`pinned: ${pinned}`;
-		} else {
-			// add it before ~~~
-			lines.splice(
-				headerEnd,
-				0,
-				`pinned: ${pinned}`
-			);
-		}
-	
-		// this will trigger the CodeBlockProcessor to rerun
-		await this.app.vault.modify(
-			file,
-			lines.join("\n")
-		);
-	}
-
-	handleOpenEditor(newEditor: {
-		container: HTMLElement;
-		restore: () => void;
-	}) {
-
-		// If same editor = do nothing
-		if (this.activeEditor?.container === newEditor.container) {
-			return;
-		}
-	
-		// Close previous editor
-		if (this.activeEditor) {
-			this.activeEditor.restore();
-		}
-	
-		this.activeEditor = newEditor;
-	}
-	
-	clearActiveEditor(editor: { container: HTMLElement }) {
-		if (this.activeEditor?.container === editor.container) {
-			this.activeEditor = null;
-		}
-
-	}
-
-	async loadSettings() {
-		const data = (await this.loadData()) as Partial<ChatNotesPluginSettings> ?? {};
-		
-		this.settings = {
-			...DEFAULT_SETTINGS,
-			...data,
-		};
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-
-		this.updateAllFileConfigs();
-		this.refreshOpenFiles();
-	}
-
-	updateAllFileConfigs() {
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			this.updateFileConfig(file);
-		}
 	}
 
 	refreshOpenFiles() {
@@ -624,22 +361,118 @@ export default class ChatNotesPlugin extends Plugin {
 			this.updateChatInputPosition(view);
 		}
 	}
-	
-	setupResizeObserver(view: MarkdownView) {
-		const el = view.contentEl;
-		if (!el) return;
-	  
-		// Clean up previous observer if needed
-		this.resizeObserver?.disconnect();
-	  
-		this.resizeObserver = new ResizeObserver(() => {
-		  this.updateChatInputPosition(view);
-		});
-	  
-		this.resizeObserver.observe(el);
+
+	/* Message Actions */
+
+	handleMenuToggle(menu: HTMLElement) {
+		if (this.openMenu && this.openMenu !== menu) {
+			this.openMenu.classList.remove("menu-open");
+		}
+
+		const isOpening = !menu.classList.contains("menu-open");
+		menu.classList.toggle("menu-open");
+		this.openMenu = isOpening ? menu : null;
+
 	}
 
-	applyScopedStyles(container: HTMLElement, config: ChatConfig) {
+	async handleMessageHighlight(msgId: string, isPinned: boolean){
+
+		if (!this.currentFile) throw new Error("Current file is not set");
+		const config = this.getConfigCache(this.currentFile);
+		const context = await this.getArchiveContext(this.currentFile);
+		const entry = context.getEntry(msgId);
+		const msg = entry.message
+
+		const el = entry.element
+		if (!el) throw new Error("Rendered element missing.");
+
+		const pinState = !(msg.header.extra.pinned === "true")
+		// message is now being unpinned
+		this.applyMessageHighlightStyle(el, config, pinState);
+		// update context
+		msg.header.extra.pinned = `${pinState}`;
+		await this.setMessageHeaderPinned(this.currentFile, entry, pinState);  // this triggers CBP
+
+		if (pinState){
+			context.pinnedMessagesAmount += 1
+		} else {
+			context.pinnedMessagesAmount -= 1
+		}
+
+	}
+
+	handleOpenEditor(newEditor: {
+		container: HTMLElement;
+		restore: () => void;
+	}) {
+
+		// If same editor = do nothing
+		if (this.activeEditor?.container === newEditor.container) {
+			return;
+		}
+	
+		// Close previous editor
+		if (this.activeEditor) {
+			this.activeEditor.restore();
+		}
+	
+		this.activeEditor = newEditor;
+	}
+	
+	clearActiveEditor(editor: { container: HTMLElement }) {
+		if (this.activeEditor?.container === editor.container) {
+			this.activeEditor = null;
+		}
+
+	}
+
+	async appendMessage(file: TFile, content: string) {
+		// TODO: create and save standart header for every chat? map?
+		// const chat_header = new Header();
+		// const msg = new Message(chat_header, content);
+		await this.app.vault.append(file, "msg.toString()");
+
+		// get view? Scroll down when sending new message?
+		// -> either get all views of open files and scroll down in all of them of this given file, or just dont scroll at all and user can use the buttons
+		scrollDocument(null, "bottom")
+	}
+
+	/* Settings & Config */
+
+	async loadSettings() {
+		const data = (await this.loadData()) as Partial<ChatNotesPluginSettings> ?? {};
+		
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...data,
+		};
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+
+		this.updateAllFileConfigs();
+		this.refreshOpenFiles();
+	}
+
+	updateAllFileConfigs() {
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			this.updateFileConfig(file);
+		}
+	}
+
+	updateFileConfig(file: TAbstractFile) {
+		// update and store config cache for a file
+		if (!(file instanceof TFile)) return;
+		const overrides = getFileOverrides(this.app, file);
+		const resolved = resolveConfig(this.settings, overrides);
+		this.getChatNote(file).configCache = resolved;
+		return resolved;
+	}
+
+	/* Styling */
+
+	applyStyles(container: HTMLElement, config: ChatConfig) {
 
 		// console.log(container)
 		if (!config.messageBgColor) return; // replace with set to default value?
@@ -675,25 +508,47 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 	}
 
-	applyStyles() {
-		document.documentElement.style.setProperty(
-			"--settings-msg-bg-color",
-			this.settings.messageBgColor
-		);
+	applyConfigStylesToFile(file: TFile){
+		// get all html containers of the open file and call applyScopedStyles on them with their current config
 
-		document.documentElement.style.setProperty(
-			"--settings-msg-corner-radius",
-			`${this.settings.messageCornerRadius}px`
-		);
-
-		const body = document.body;
-
-		if (this.settings.enableButtonShadow) {
-			body.classList.remove("menu-btn-no-shadow");
-		} else {
-			body.classList.add("menu-btn-no-shadow");
+		console.log("applying styles to containers")
+		const allContainers = getActiveContainers(this.app, file)
+		if (!allContainers) return;
+		const config = this.getConfigCache(file)!;
+		for (const fileContainers of allContainers) {
+			for (const container of fileContainers) {
+				  this.applyStyles(container, config);
+			}
 		}
 
+	}
+
+	/* Helper Methods */
+
+	getChatInput(): HTMLElement {
+		if (!this.chatInputEl) {
+			const result = createChatInput(this);
+			this.chatInputEl = result.container;
+			this.chatTextareaEl = result.textarea;
+		}
+	
+		return this.chatInputEl;
+	}
+
+	getInputValue(): string {
+		//TODO return if not initialized?
+		const input = this.chatInputEl.querySelector("textarea, input");
+		return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+			? input.value
+			: "";
+	}
+	
+	setInputValue(value: string) {
+		//TODO lazy initialize? -> need to get view
+		const input = this.chatInputEl.querySelector("textarea, input");
+		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+			input.value = value;
+		}
 	}
 
     getChatNote(file: TFile): ChatNote {
@@ -732,7 +587,7 @@ export default class ChatNotesPlugin extends Plugin {
 		return note.isChatNote;
 	}
 
-	private async getArchiveContext(file: TFile): Promise<ArchiveContext> {
+	async getArchiveContext(file: TFile): Promise<ArchiveContext> {
 
  		// promise because CBP works asynchronously, otherwise it will calculate it for multiple messages
 		let contextPromise = this.archiveContexts.get(file.path);
@@ -750,5 +605,39 @@ export default class ChatNotesPlugin extends Plugin {
 		return contextPromise;
 	}
 
+	async setMessageHeaderPinned(file: TFile, entry: MessageEntry, pinned: boolean) {
+
+		const content = await this.app.vault.read(file);
+		const lines = content.split("\n");
+		const start = entry.startLine;
+
+		const headerEnd = lines.indexOf(
+			"~~~",
+			start + 1
+		);
+
+		const headerLines = lines.slice(start, headerEnd);
+		const pinnedLine = headerLines.findIndex(
+			line => line.startsWith("pinned:")
+		);
+	
+		if (pinnedLine !== -1) {
+			lines[start + pinnedLine] =
+				`pinned: ${pinned}`;
+		} else {
+			// add it before ~~~
+			lines.splice(
+				headerEnd,
+				0,
+				`pinned: ${pinned}`
+			);
+		}
+	
+		// this will trigger the CodeBlockProcessor to rerun
+		await this.app.vault.modify(
+			file,
+			lines.join("\n")
+		);
+	}
 }
 
