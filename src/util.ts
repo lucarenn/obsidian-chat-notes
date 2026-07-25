@@ -41,7 +41,7 @@ export function extractMessageIdFromSource(source: string): string {
 	return value;
 }
 
-export function parseMessages(source: string): Map<string, MessageEntry> {
+export function parseMessages(source: string): [Map<string, MessageEntry>, number] {
 
 	const messages = new Map<string, MessageEntry>();
 	const lines = source.split("\n");
@@ -49,6 +49,7 @@ export function parseMessages(source: string): Map<string, MessageEntry> {
 	let currentBlock: string[] = [];
 	let currentStartLine = 0;
 	let currentLastLine = -1;
+	let pinnedMessageCounter = 0
 
 	for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 		const line = lines[lineNumber];
@@ -82,6 +83,10 @@ export function parseMessages(source: string): Map<string, MessageEntry> {
 					}
 				);
 
+				if(message.header.extra.pinned === "true") {
+					pinnedMessageCounter += 1
+				}
+				
 			} catch (e) {
 				console.warn(
 					"Failed to parse chat message",
@@ -98,7 +103,7 @@ export function parseMessages(source: string): Map<string, MessageEntry> {
 		}
 	}
 
-	return messages;
+	return [messages, pinnedMessageCounter];
 }
 
 export function getActiveContainers(app: App, file: TAbstractFile){

@@ -1,8 +1,8 @@
 import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile } from "obsidian";
 import { Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
-import { createElementsHTML, addScrollButtons, createChatInput } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers } from "./util"
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers} from "./util"
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -32,11 +32,12 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	
 		const source = await this.app.vault.read(file);
-		const messages = parseMessages(source);
-	
+		const [messages, pinnedMessagecount] = parseMessages(source);
+
 		return new ArchiveContext(
 			file,
-			messages
+			messages,
+			pinnedMessagecount
 		);
 	}
 
@@ -88,7 +89,7 @@ export default class ChatNotesPlugin extends Plugin {
 		
 		this.registerEvent(
 			// on METADATA FILE CHANGES
-			/* Detect yaml changes and refresh/rerender the file if the settings are overridden or it becomes or is no longer a chat note */
+			/* Detect yaml changes and refresh/rerender the file if the settings are overridden or if chat state is changed */
 
 			this.app.metadataCache.on("changed", (file) => {
 				void this.onYAMLChange(file).catch(err => {
@@ -104,6 +105,7 @@ export default class ChatNotesPlugin extends Plugin {
 			})
 		);
 
+		// this is the main loop to discover, create and render Messages
 		this.registerMarkdownCodeBlockProcessor(
 			"chat-message",
 			async (source, el, ctx) => {
@@ -145,17 +147,27 @@ export default class ChatNotesPlugin extends Plugin {
 					msg,
 					author_text: msg.header.author ?? config.author,
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
-					onHighlight: this.handleMessageHighlight.bind(this)		// callback for the highlight/pin button
+					onHighlight: this.handleMessagePin.bind(this)		// callback for the highlight/pin button
 				});
+
+				if (context.filterPinnedOnly) {
+					const pinned = entry.message.header.extra.pinned === "true";
+					wrapper.classList.toggle(
+						"hidden-by-pin-filter",
+						!pinned
+					);
+				}
 				
 				// attach message to file html container
 				el.appendChild(wrapper);
 				entry.element = wrapper;
+
+
 				
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
 				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
 				if (note.lastAppliedConfig !== note.configCache) {
-					this.applyConfigStylesToFile(file);
+					await this.applyConfigStylesToFile(file);
 					note.lastAppliedConfig = note.configCache;
 				}
 
@@ -222,6 +234,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
+		addPinButton(view, this.showPinnedMessagesOnly.bind(this));
+		addScrollMsgButton(view, this.currentFile!, "3", this.scrollToMessage.bind(this));
 
 		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 		input.style.display = "flex";
@@ -265,9 +279,8 @@ export default class ChatNotesPlugin extends Plugin {
 			const context = await this.getArchiveContext(file);
 			if (context.pinnedMessagesAmount === 0) {
 				console.log("Container based Styling")
-				this.applyConfigStylesToFile(file);
+				await this.applyConfigStylesToFile(file);
 			} else {
-				
 				console.log("Message based Styling")
 				context.refreshStylesPerMessage(this.getConfigCache(file));
 			}
@@ -375,7 +388,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	async handleMessageHighlight(msgId: string, isPinned: boolean){
+	async handleMessagePin(msgId: string, isPinned: boolean){
 
 		if (!this.currentFile) throw new Error("Current file is not set");
 		const config = this.getConfigCache(this.currentFile);
@@ -437,6 +450,75 @@ export default class ChatNotesPlugin extends Plugin {
 		scrollDocument(null, "bottom")
 	}
 
+	async showPinnedMessagesOnly(){
+		const context = await this.getArchiveContext(this.currentFile!);
+		context.updateVisibility();
+	}
+
+	async scrollToMessage(file: TFile, msgId: string, options?: {
+		behavior?: ScrollBehavior;
+		block?: ScrollLogicalPosition;
+		highlight?: boolean;
+	}) {
+		const context = await this.getArchiveContext(file);
+		const entry = context.getEntry(msgId);
+	
+		if (!entry?.element) return false;
+	
+		entry.element.scrollIntoView({
+			behavior: options?.behavior ?? "smooth",
+			block: options?.block ?? "center",
+			inline: "nearest",
+		});
+
+		// wait until scrolling has finished and then play the highlight animation
+		await this.waitUntilVisible(entry.element);
+
+		if (options?.highlight ?? true) {
+			entry.element.classList.add("chat-message-scroll-highlight");
+			setTimeout(() => {
+				if (entry.element) {
+					entry.element.classList.remove("chat-message-scroll-highlight");
+				}
+			}, 900);
+		}
+	
+		return true;
+	}
+
+	async waitUntilVisible(
+		element: HTMLElement,
+		container: HTMLElement | Window = window,
+		margin = 20
+	): Promise<void> {
+		return new Promise(resolve => {
+			const check = () => {
+				const rect = element.getBoundingClientRect();
+	
+				let visible: boolean;
+	
+				if (container === window) {
+					visible =
+						rect.top >= margin &&
+						rect.bottom <= window.innerHeight - margin;
+				} else {
+					const cRect = (container as HTMLElement).getBoundingClientRect();
+					visible =
+						rect.top >= cRect.top + margin &&
+						rect.bottom <= cRect.bottom - margin;
+				}
+	
+				if (visible) {
+					resolve();
+				} else {
+					requestAnimationFrame(check);
+				}
+			};
+	
+			check();
+		});
+	}
+
 	/* Settings & Config */
 
 	async loadSettings() {
@@ -472,10 +554,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Styling */
 
-	applyStyles(container: HTMLElement, config: ChatConfig) {
+	async applyStyles(container: HTMLElement, config: ChatConfig, context: ArchiveContext) {
 
 		// console.log(container)
-		if (!config.messageBgColor) return; // replace with set to default value?
+		if (!config.messageBgColor) return;
 		container.style.setProperty(
 		  "--settings-msg-bg-color",
 		  config.messageBgColor
@@ -490,6 +572,16 @@ export default class ChatNotesPlugin extends Plugin {
 			container.classList.remove("menu-btn-no-shadow");
 		} else {
 			container.classList.add("menu-btn-no-shadow");
+		}
+
+		if (!config.messageFlashColor) return;
+		container.style.setProperty(
+		  "--settings-msg-flash-color",
+		  config.messageFlashColor
+		);
+
+		if (context.pinnedMessagesAmount > 0){
+			context.refreshStylesPerMessage(config);
 		}
 	}
 
@@ -508,16 +600,17 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 	}
 
-	applyConfigStylesToFile(file: TFile){
+	async applyConfigStylesToFile(file: TFile){
 		// get all html containers of the open file and call applyScopedStyles on them with their current config
 
 		console.log("applying styles to containers")
 		const allContainers = getActiveContainers(this.app, file)
 		if (!allContainers) return;
 		const config = this.getConfigCache(file)!;
+		const context = await this.getArchiveContext(file);
 		for (const fileContainers of allContainers) {
 			for (const container of fileContainers) {
-				  this.applyStyles(container, config);
+					await this.applyStyles(container, config, context);
 			}
 		}
 

@@ -9,13 +9,15 @@ export class ArchiveContext {
 	messageMap: Map<string, MessageEntry>
     renderedElements: Map<string, HTMLElement>;
 	pinnedMessagesAmount: number;
+	filterPinnedOnly: boolean;
 
-    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>) {
+    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>, pinnedMessages?: number) {
         this.file = file;
 		// this.messages = msgEntries;
         this.messageMap = msgEntryMap;
 		this.renderedElements = new Map();
-		this.pinnedMessagesAmount = 0;
+		this.pinnedMessagesAmount = pinnedMessages ?? 0;
+		this.filterPinnedOnly = false;
     }
 
 	getEntry(id: string): MessageEntry {
@@ -47,6 +49,87 @@ export class ArchiveContext {
 		}
 	}
 
+/*  BUMP Animation
+	updateVisibility() {
+
+
+		for (const entry of this.messageMap.values()) {
+	
+			if (!entry.element)
+				continue;
+	
+			const isPinned = entry.message.header.extra.pinned === "true";
+			
+			console.log(isPinned);
+	
+			entry.element.classList.toggle(
+				"hidden-by-pin-filter",
+				!isPinned && !this.filterPinnedOnly	
+			);
+
+			entry.element.classList.add("bump");
+
+			entry.element.addEventListener(
+				"animationend",
+				() => entry.element!.classList.remove("bump"),
+				{ once: true }
+			);
+
+		}
+		
+		this.filterPinnedOnly = !this.filterPinnedOnly;
+	}
+	*/
+
+	updateVisibility() {
+		// Store initial positions of all message elements
+		const initialPositions = new Map<HTMLElement, number>();
+		for (const entry of this.messageMap.values()) {
+			
+			if (entry.element) {
+				
+				console.log(entry.element?.isConnected);
+				initialPositions.set(entry.element, entry.element.getBoundingClientRect().top);
+			}
+		}
+	
+		this.filterPinnedOnly = !this.filterPinnedOnly;
+	
+		// Apply visibility changes to DOM
+		for (const entry of this.messageMap.values()) {
+			if (!entry.element) continue;
+	
+			const isPinned = entry.message.header.extra.pinned === "true";
+	
+			const shouldHide = this.filterPinnedOnly && !isPinned;
+			entry.element.classList.toggle("hidden-by-pin-filter", shouldHide);
+		}
+	
+		// Animate layout shift for elements that remain visible
+		for (const entry of this.messageMap.values()) {
+			const el = entry.element;
+			if (!el || el.classList.contains("hidden-by-pin-filter")) continue;
+	
+			const firstTop = initialPositions.get(el);
+			if (firstTop === undefined) continue;
+	
+			const lastTop = el.getBoundingClientRect().top;
+			const deltaY = firstTop - lastTop;
+	
+			// If the position changed, slide it smoothly from old position to new position
+			if (deltaY !== 0) {
+				el.style.transform = `translateY(${deltaY}px)`;
+				el.style.transition = "transform 0s";
+				el.offsetHeight;
+				el.style.transition = "transform 180ms cubic-bezier(0.34, 1.35, 0.64, 1)";
+				el.style.transform = "";
+
+				el.addEventListener("transitionend", () => {
+					el.style.transition = "";
+				}, { once: true });
+			}
+		}
+	}
 }
 
 export interface MessageEntry {

@@ -60,6 +60,38 @@ export function addScrollButtons(view: MarkdownView) {
 	});
 }
 
+
+export function addPinButton(view: MarkdownView, onPress: ()=>void) {
+	
+	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+	if (!view) return;
+
+	// Avoid adding multiple times
+	if ((view as any)._pinButtonAdded) return;
+	(view as any)._pinButtonAdded = true;
+
+	view.addAction("pin", "Show Pinned Messages", async (evt) => {
+		await onPress();
+	});
+
+}
+
+export function addScrollMsgButton(view: MarkdownView,
+	file: TFile,
+	msgId: string,
+	onScroll: (file: TFile, id:  string)=>void) {
+	
+	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+	if (!view) return;
+	if ((view as any)._msgScrollButtonAdded) return;
+	(view as any)._msgScrollButtonAdded = true;
+
+	view.addAction("pin", "Scroll to Message: " + msgId,  (evt) => {
+		onScroll(file, msgId);
+	});
+
+}
+
 /**
 Create HTML elements for messages
 */
@@ -148,6 +180,36 @@ function createMessageActionsMenu({
     copyBtn.addEventListener("click", () => {
 		void (async () => {
 			await navigator.clipboard.writeText(msg.content);
+			
+			/*
+			setIcon(copyBtn, "checkmark");
+			
+			let resetTimer = Number(msg.header.id)
+			clearTimeout(resetTimer);
+			resetTimer = window.setTimeout(() => {
+				setIcon(copyBtn, "copy");
+			}, 900);
+
+			new Notice("Copied message");
+			*/
+
+			copyBtn.classList.add("fade");
+			setTimeout(() => {
+				setIcon(copyBtn, "checkmark");
+				copyBtn.classList.remove("fade");
+			}, 150);
+
+			let resetTimer = Number(msg.header.id);
+			clearTimeout(resetTimer);
+
+			resetTimer = window.setTimeout(() => {
+				copyBtn.classList.add("fade");
+				setTimeout(() => {
+					setIcon(copyBtn, "copy");
+					copyBtn.classList.remove("fade");
+				}, 180);
+			}, 1100);
+
 			new Notice("Copied message");
 
 		})();

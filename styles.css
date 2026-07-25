@@ -22,6 +22,22 @@
     background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;  
 
     border: 1px solid var(--msg-border-color);
+    will-change: transform;
+}
+
+.chat-message.bump {
+    animation: bump 180ms ease;
+}
+
+@keyframes bump {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.03); }
+    100% { transform: scale(1); }
+}
+
+/* Filter to hide messages that are not pinned */
+.hidden-by-pin-filter {
+    display: none !important;
 }
 
 .markdown-reading-view .chat-message
@@ -31,7 +47,6 @@
 .markdown-source-view.mod-cm6 .chat-message {
     background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
 }
-
 
 /* Set note background to transparent (just display messages) */
 .markdown-reading-view .markdown-preview-view,
@@ -60,6 +75,47 @@
     word-break: break-word;
 }
 
+/* Scroll to message highlighting */  
+.chat-message::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+}
+
+.chat-message-scroll-highlight::after {
+    animation: message-highlight 0.9s ease;
+}
+
+@keyframes message-highlight {
+    0% {
+        border: 5px solid var(--settings-msg-flash-color, white);
+        background: transparent;
+        opacity: 0;
+    }
+
+    35% {
+        background:  var(--settings-msg-flash-color, rgba(255, 255, 255, 0.55));
+        border: 5px solid  var(--settings-msg-flash-color, white);
+        opacity: 0.9;
+    }
+
+    45% {
+        
+        border: 4px solid  var(--settings-msg-flash-color, white);
+        background: transparent;
+        opacity: 1;
+    }
+
+    100% {
+        
+        border: 2px solid  var(--settings-msg-flash-color, white);
+        background: transparent;
+        opacity: 0;
+    }
+}
 
 /* --------------------------------*/
 /* MESSAGE HEADER */
@@ -129,6 +185,7 @@
     border-radius: 4px;
     padding: 0px 6px;
     cursor: pointer;
+    transition: opacity 180ms ease;
 }
 
 /* turn off shadow via settings*/
@@ -148,6 +205,11 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 20px;
+}
+
+
+.msg-action-btn.fade {
+    opacity: 0.5;
 }
 
 /* --------------------------------*/

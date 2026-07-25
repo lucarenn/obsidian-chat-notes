@@ -12,7 +12,8 @@ export interface ChatConfig {
 	chatId?: string;
 	author?: string;
 	messageHighlightColor?: string;
-	// add future settings here
+	messageFlashColor?: string;
+	// add future settings (that can be overriden in yaml) here
 }
 
 
@@ -21,6 +22,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	enableButtonShadow: boolean;
     messageCornerRadius: number;
 	messageHighlightColor: string;
+	messageFlashColor: string;
 	// specify the variables that should appear in global settings
 }
 
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	enableButtonShadow: true,
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
+	messageFlashColor: "white",
 	// add default values here
 };
 
@@ -70,6 +73,18 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Message flash color")
+		.setDesc("Determines the color for the short flash highlighting when scrolling to a specific message")
+		.addColorPicker(color => {
+			color
+				.setValue(this.plugin.settings.messageFlashColor)
+				.onChange(async (value) => {
+					this.plugin.settings.messageFlashColor = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Enable button shadow")
 		.setDesc("Toggle shadow on message action buttons")
 		.addToggle(toggle => {
@@ -103,12 +118,13 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
   
 	if (!fm) return {};
   	
-	// set variable names for the yaml overrides here:
+	// set variable alias names for the yaml overrides here:
 	return {
 		chatId: fm.chatId,
 		author: fm.author,
 		messageBgColor: fm.msgColor,
-		messageHighlightColor: fm.msgPinColor
+		messageHighlightColor: fm.msgPinColor,
+		messageFlashColor: fm. msgFlashColor
 	};
 }
 
