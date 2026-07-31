@@ -181,18 +181,6 @@ function createMessageActionsMenu({
 		void (async () => {
 			await navigator.clipboard.writeText(msg.content);
 			
-			/*
-			setIcon(copyBtn, "checkmark");
-			
-			let resetTimer = Number(msg.header.id)
-			clearTimeout(resetTimer);
-			resetTimer = window.setTimeout(() => {
-				setIcon(copyBtn, "copy");
-			}, 900);
-
-			new Notice("Copied message");
-			*/
-
 			copyBtn.classList.add("fade");
 			setTimeout(() => {
 				setIcon(copyBtn, "checkmark");
@@ -414,6 +402,11 @@ function createMessageActionsMenu({
 	};
 };
 
+async function copyHeaderText(text: string, noticeText: string) {
+	await navigator.clipboard.writeText(text);
+	new Notice(noticeText);
+}
+
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
 
 	const header = document.createElement("div");
@@ -422,13 +415,25 @@ function createMessageHeader(authorText: string, timestampText: string, menu: HT
 	const meta = document.createElement("div");
 	meta.className = "msg-header-meta";
 
-	const author = document.createElement("span");
+	const author = document.createElement("button");
+	author.type = "button";
 	author.className = "msg-author";
 	author.textContent = authorText;
+	author.setAttribute("aria-label", "Copy author");
+	author.addEventListener("click", (e) => {
+		e.stopPropagation();
+		void copyHeaderText(authorText, "Copied author");
+	});
 
-	const timestamp = document.createElement("span");
+	const timestamp = document.createElement("button");
+	timestamp.type = "button";
 	timestamp.className = "msg-timestamp";
 	timestamp.textContent = timestampText;
+	timestamp.setAttribute("aria-label", "Copy date");
+	timestamp.addEventListener("click", (e) => {
+		e.stopPropagation();
+		void copyHeaderText(timestampText, "Copied date");
+	});
 
 	meta.append(author, timestamp);
 	header.append(meta, menu);

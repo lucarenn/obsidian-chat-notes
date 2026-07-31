@@ -137,6 +137,21 @@
     margin-right: 12px;
 }
 
+.msg-author,
+.msg-timestamp {
+    font: inherit;
+    border: none;
+    cursor: pointer;
+}
+
+.msg-author {
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+}
+
 .msg-timestamp {
     background-color: #2e2c30;
     border-radius: 5px;

@@ -235,7 +235,6 @@ export default class ChatNotesPlugin extends Plugin {
 		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
 		addPinButton(view, this.showPinnedMessagesOnly.bind(this));
-		addScrollMsgButton(view, this.currentFile!, "3", this.scrollToMessage.bind(this));
 
 		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 		input.style.display = "flex";
@@ -557,11 +556,12 @@ export default class ChatNotesPlugin extends Plugin {
 	async applyStyles(container: HTMLElement, config: ChatConfig, context: ArchiveContext) {
 
 		// console.log(container)
-		if (!config.messageBgColor) return;
-		container.style.setProperty(
-		  "--settings-msg-bg-color",
-		  config.messageBgColor
-		);
+		if (config.messageBgColor) {
+			container.style.setProperty(
+				"--settings-msg-bg-color",
+				config.messageBgColor
+			);
+		}
 	  
 		container.style.setProperty(
 		  "--settings-msg-corner-radius",
@@ -574,11 +574,12 @@ export default class ChatNotesPlugin extends Plugin {
 			container.classList.add("menu-btn-no-shadow");
 		}
 
-		if (!config.messageFlashColor) return;
-		container.style.setProperty(
-		  "--settings-msg-flash-color",
-		  config.messageFlashColor
-		);
+		if (config.messageFlashColor){
+			container.style.setProperty(
+				"--settings-msg-flash-color",
+				config.messageFlashColor
+			);
+		}
 
 		if (context.pinnedMessagesAmount > 0){
 			context.refreshStylesPerMessage(config);
