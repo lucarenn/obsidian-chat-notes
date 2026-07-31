@@ -62,6 +62,33 @@ export default class ChatNotesPlugin extends Plugin {
 			hotkeys: [{ modifiers: ["Mod"], key: "m" }],
 		});
 
+		this.addCommand({
+			id: "scroll-to-bottom",
+			name: "Scroll to Bottom",
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const canRun = !!view?.file && this.getIsChatNote(view.file);
+				if (canRun && !checking) {
+					scrollDocument(view!, "bottom");
+				}
+				return canRun;
+			},
+			hotkeys: [{ modifiers: ["Mod"], key: "ArrowDown" }],
+		});
+
+		this.addCommand({
+			id: "scroll-to-top",
+			name: "Scroll to Top",
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const canRun = !!view?.file && this.getIsChatNote(view.file);
+				if (canRun && !checking) {
+					scrollDocument(view!, "top");
+				}
+				return canRun;
+			},
+			hotkeys: [{ modifiers: ["Mod"], key: "ArrowUp" }],
+		});
 		
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
