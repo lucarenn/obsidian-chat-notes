@@ -48,6 +48,21 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// load global settings
 		await this.loadSettings();
+
+		this.addCommand({
+			id: "focus-chat-input",
+			name: "Focus chat input",
+			checkCallback: (checking) => {
+				const canFocus = !!this.currentFile && this.getIsChatNote(this.currentFile);
+				if (canFocus && !checking) {
+					this.chatTextareaEl?.focus();
+				}
+				return canFocus;
+			},
+			hotkeys: [{ modifiers: ["Mod"], key: "m" }],
+		});
+
+		
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
 		document.addEventListener("click", (event) => {
@@ -444,9 +459,6 @@ export default class ChatNotesPlugin extends Plugin {
 		// const msg = new Message(chat_header, content);
 		await this.app.vault.append(file, "msg.toString()");
 
-		// get view? Scroll down when sending new message?
-		// -> either get all views of open files and scroll down in all of them of this given file, or just dont scroll at all and user can use the buttons
-		scrollDocument(null, "bottom")
 	}
 
 	async showPinnedMessagesOnly(){
@@ -642,6 +654,8 @@ export default class ChatNotesPlugin extends Plugin {
 		const input = this.chatInputEl.querySelector("textarea, input");
 		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
 			input.value = value;
+			// resize the textarea to fit the restored content
+			input.dispatchEvent(new Event("input"));
 		}
 	}
 

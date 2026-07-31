@@ -1,4 +1,4 @@
-import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView } from "obsidian";
+import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
 import { ConfirmDeleteModal } from "./modals" 
 import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
 import { scrollDocument } from "./util"
@@ -12,17 +12,26 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		cls: "chat-input"
 	});
 
+	const resizeInput = () => {
+		const maxHeight = plugin.settings.inputMaxHeight;
+		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+		textarea.style.height = "auto";
+		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+		textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+	};
+
 	textarea.oninput = () => {
 		if (plugin.currentFile) {
 			plugin.getChatNote(plugin.currentFile).inputCache = textarea.value;
 		}
+		resizeInput();
 	};
 
-	const button = container.createEl("button");
-	button.className = "chat-send-button";
-	setIcon(button, "send");
+	// set the baseline height immediately, so the field isn't collapsed
+	// for an instant when first created (before any input is entered)
+	resizeInput();
 
-	button.onclick = async () => {
+	const sendMessage = async () => {
 		const file = plugin.app.workspace.getActiveFile();
 		if (!file || !plugin.getIsChatNote(file)) return;
 
@@ -33,7 +42,25 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 
 		textarea.value = "";
 		plugin.getChatNote(file).inputCache = "";
+		resizeInput();
 	};
+
+	// Obsidian's global hotkey scope can swallow "Mod+Enter" before it ever
+	// reaches a plain keydown listener (e.g. if some other command already
+	// claims that combo). Registering our own scope and pushing it while
+	// the input is focused makes our binding take priority instead.
+	const sendScope = new Scope(plugin.app.scope);
+	sendScope.register(["Mod"], "Enter", () => {
+		void sendMessage();
+		return false; // auto preventDefault, stops a newline from being inserted
+	});
+	textarea.addEventListener("focus", () => plugin.app.keymap.pushScope(sendScope));
+	textarea.addEventListener("blur", () => plugin.app.keymap.popScope(sendScope));
+
+	const button = container.createEl("button");
+	button.className = "chat-send-button";
+	setIcon(button, "send");
+	button.onclick = sendMessage;
 
 	return {
 		container,

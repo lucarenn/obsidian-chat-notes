@@ -4,7 +4,8 @@ import ChatNotesPlugin from "./main";
 
 
 export interface ChatConfig {
-	// holds all possible settings for a chat (can be more than global settings)
+	// holds all possible settings for a chat to override global settings 
+	// (can contain more than global settings)
 
 	messageBgColor?: string;
 	enableButtonShadow?: boolean;
@@ -23,6 +24,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
     messageCornerRadius: number;
 	messageHighlightColor: string;
 	messageFlashColor: string;
+	inputMaxHeight: number;
 	// specify the variables that should appear in global settings
 }
 
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
 	messageFlashColor: "white",
+	inputMaxHeight: 200,
 	// add default values here
 };
 
@@ -101,10 +104,24 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		.setDesc("Determines how round corners of the message bubbles are")
 		.addSlider(slider => {
 			slider
-				.setValue(this.plugin.settings.messageCornerRadius)
 				.setLimits(0, 50, 1) 	// min 0px, max 50px, step 1px
+				.setValue(this.plugin.settings.messageCornerRadius)
 				.onChange(async (value) => {
 					this.plugin.settings.messageCornerRadius = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
+		.setName("Max input field height")
+		.setDesc("Determines how tall the message input field can grow before it starts scrolling")
+		.addSlider(slider => {
+			slider
+				.setLimits(60, 600, 20) 	// min 60px, max 600px, step 20px
+				.setValue(this.plugin.settings.inputMaxHeight)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.inputMaxHeight = value;
 					await this.plugin.saveSettings();
 				});
 		});

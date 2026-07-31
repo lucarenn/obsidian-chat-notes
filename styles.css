@@ -314,9 +314,12 @@ padding-bottom: 80px;
     flex: 1;
     resize: none;
     margin: 2px;
+    overflow-y: auto;
+    min-height: 48px; /* keeps the original baseline height even when content/JS height is smaller */
 }
 
 .chat-send-button {
     flex-shrink: 0;
     position: relative;
+    align-self: flex-end;
 }
