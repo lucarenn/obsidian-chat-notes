@@ -2,7 +2,7 @@ import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstract
 import { Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers} from "./util"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor } from "./util"
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -10,6 +10,8 @@ export default class ChatNotesPlugin extends Plugin {
 	settings: ChatNotesPluginSettings;
 	chatInputEl: HTMLElement;
 	chatTextareaEl: HTMLTextAreaElement;
+	chatReplyBannerEl: HTMLElement;
+	chatReplyTextEl: HTMLElement;
 	resizeObserver: ResizeObserver | null = null;
 	currentFile: TFile | null = null;
 
@@ -183,13 +185,17 @@ export default class ChatNotesPlugin extends Plugin {
 				const config = this.getConfigCache(file);
 
 				// Create HTML structure for message
-				const {wrapper, content} = createElementsHTML({
+				const {wrapper, content, row} = createElementsHTML({
 					plugin: this,
 					ctx,
 					msg,
 					author_text: msg.header.author ?? config.author,
+					context,
+					isReplyTarget: note.replyTo === msg.header.id,
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
-					onHighlight: this.handleMessagePin.bind(this)		// callback for the highlight/pin button
+					onHighlight: this.handleMessagePin.bind(this),		// callback for the highlight/pin button
+					onReplyToggle: this.handleReplyToggle.bind(this),		// callback for the hover reply button
+					onScrollToReply: (targetId: string) => { void this.scrollToMessage(file, targetId); }	// callback for the reply banner
 				});
 
 				if (context.filterPinnedOnly) {
@@ -200,8 +206,10 @@ export default class ChatNotesPlugin extends Plugin {
 					);
 				}
 				
-				// attach message to file html container
-				el.appendChild(wrapper);
+				// attach message to file html container (row wraps the bubble + reply button;
+				// entry.element stays pointed at the bubble itself so pin/highlight/scroll
+				// styling keeps targeting exactly what it did before)
+				el.appendChild(row);
 				entry.element = wrapper;
 
 
@@ -266,6 +274,7 @@ export default class ChatNotesPlugin extends Plugin {
 			input.style.display = "none";
 			this.resizeObserver?.disconnect();
 			this.currentFile = null;
+			void this.updateReplyBanner();
 			return;
 		}
 
@@ -273,6 +282,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.currentFile = newFile
 		const saved = this.getChatNote(newFile).inputCache ?? "";
 		this.setInputValue(saved);
+		void this.updateReplyBanner();
 
 		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
@@ -316,15 +326,7 @@ export default class ChatNotesPlugin extends Plugin {
 		if (currentStatus && (currentStatus === previousStatus)) {
 			// chat file YAML was changed -> apply styles
 			// TODO: detect and update other new settings (not just styles)
-
-			const context = await this.getArchiveContext(file);
-			if (context.pinnedMessagesAmount === 0) {
-				console.log("Container based Styling")
-				await this.applyConfigStylesToFile(file);
-			} else {
-				console.log("Message based Styling")
-				context.refreshStylesPerMessage(this.getConfigCache(file));
-			}
+			await this.applyConfigStylesToFile(file);
 
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
@@ -455,6 +457,75 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
+	async handleReplyToggle(msgId: string) {
+
+		if (!this.currentFile) throw new Error("Current file is not set");
+		const note = this.getChatNote(this.currentFile);
+		const context = await this.getArchiveContext(this.currentFile);
+
+		// clear the highlight on the previously targeted message, if any
+		if (note.replyTo) {
+			const previous = context.messageMap.get(note.replyTo);
+			previous?.element?.classList.remove("chat-message-reply-target");
+		}
+
+		// clicking the same message again cancels the reply
+		const wasSameTarget = note.replyTo === msgId;
+		note.replyTo = wasSameTarget ? undefined : msgId;
+
+		if (note.replyTo) {
+			const entry = context.getEntry(note.replyTo);
+			entry.element?.classList.add("chat-message-reply-target");
+		}
+
+		await this.updateReplyBanner();
+	}
+
+	/* Cancels the pending reply (if any) and reverts the input to a normal send,
+	   used by both the input banner's cross button and after a message is sent. */
+	async handleCancelReply() {
+
+		if (!this.currentFile) return;
+		const note = this.getChatNote(this.currentFile);
+		if (!note.replyTo) return;
+
+		const context = await this.getArchiveContext(this.currentFile);
+		const previous = context.messageMap.get(note.replyTo);
+		previous?.element?.classList.remove("chat-message-reply-target");
+
+		note.replyTo = undefined;
+		await this.updateReplyBanner();
+	}
+
+	/* Syncs the input's reply banner (shown/hidden + preview text) with the current
+	   file's pending reply target. */
+	async updateReplyBanner() {
+
+		if (!this.chatReplyBannerEl || !this.chatReplyTextEl) return;
+
+		if (!this.currentFile) {
+			this.chatReplyBannerEl.classList.remove("is-visible");
+			return;
+		}
+
+		const note = this.getChatNote(this.currentFile);
+		if (!note.replyTo) {
+			this.chatReplyBannerEl.classList.remove("is-visible");
+			return;
+		}
+
+		const context = await this.getArchiveContext(this.currentFile);
+		// bail if the reply was cancelled (or changed) while the context was loading
+		if (this.getChatNote(this.currentFile).replyTo !== note.replyTo) return;
+
+		const targetEntry = context.messageMap.get(note.replyTo);
+		const author = targetEntry?.message.header.author || "Unknown";
+		const preview = targetEntry?.message.content.trim().replace(/\s+/g, " ").slice(0, 80);
+
+		this.chatReplyTextEl.textContent = preview ? `Replying to ${author}: ${preview}` : `Replying to ${author}`;
+		this.chatReplyBannerEl.classList.add("is-visible");
+	}
+
 	handleOpenEditor(newEditor: {
 		container: HTMLElement;
 		restore: () => void;
@@ -484,7 +555,7 @@ export default class ChatNotesPlugin extends Plugin {
 		// TODO: create and save standart header for every chat? map?
 		// const chat_header = new Header();
 		// const msg = new Message(chat_header, content);
-		await this.app.vault.append(file, "msg.toString()");
+		await this.app.vault.append(file, "test");
 
 	}
 
@@ -500,9 +571,27 @@ export default class ChatNotesPlugin extends Plugin {
 	}) {
 		const context = await this.getArchiveContext(file);
 		const entry = context.getEntry(msgId);
-	
-		if (!entry?.element) return false;
-	
+
+		// Reading View and Live Preview both only render messages near the current
+		// scroll position (CodeMirror unmounts far-off widgets entirely, and Reading
+		// View lazily renders long notes in sections) - entry.element is undefined, or
+		// still points at an old detached node, for any message that hasn't been
+		// rendered/re-rendered since it last scrolled into view. Force Obsidian to jump
+		// to its source line first (which mounts it via our codeblock processor), then
+		// wait for that render to land before doing the precise scroll + highlight.
+		if (!entry.element || !entry.element.isConnected) {
+			const view = this.app.workspace.getLeavesOfType("markdown")
+				.map(leaf => leaf.view)
+				.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
+
+			if (view) {
+				view.setEphemeralState({ line: entry.startLine });
+				await this.waitForRenderedElement(entry);
+			}
+		}
+
+		if (!entry.element) return false;
+
 		entry.element.scrollIntoView({
 			behavior: options?.behavior ?? "smooth",
 			block: options?.block ?? "center",
@@ -520,39 +609,56 @@ export default class ChatNotesPlugin extends Plugin {
 				}
 			}, 900);
 		}
-	
+
 		return true;
+	}
+
+	/* Polls (via rAF) until the codeblock processor has (re)rendered this entry's
+	   element into the live DOM, or gives up after timeoutMs so callers never hang. */
+	async waitForRenderedElement(entry: MessageEntry, timeoutMs = 1500): Promise<void> {
+		const start = performance.now();
+
+		while (!entry.element || !entry.element.isConnected) {
+			if (performance.now() - start > timeoutMs) return;
+			await new Promise(resolve => requestAnimationFrame(resolve));
+		}
 	}
 
 	async waitUntilVisible(
 		element: HTMLElement,
 		container: HTMLElement | Window = window,
-		margin = 20
+		margin = 20,
+		timeoutMs = 1500
 	): Promise<void> {
 		return new Promise(resolve => {
+			const start = performance.now();
+
 			const check = () => {
 				const rect = element.getBoundingClientRect();
-	
+
+				// Overlap-based (not full-containment) so this also resolves for messages
+				// taller than the viewport, which full containment could never satisfy -
+				// scrollIntoView({block: "center"}) already centers as best it can there.
 				let visible: boolean;
-	
+
 				if (container === window) {
 					visible =
-						rect.top >= margin &&
-						rect.bottom <= window.innerHeight - margin;
+						rect.top <= window.innerHeight - margin &&
+						rect.bottom >= margin;
 				} else {
 					const cRect = (container as HTMLElement).getBoundingClientRect();
 					visible =
-						rect.top >= cRect.top + margin &&
-						rect.bottom <= cRect.bottom - margin;
+						rect.top <= cRect.bottom - margin &&
+						rect.bottom >= cRect.top + margin;
 				}
-	
-				if (visible) {
+
+				if (visible || performance.now() - start > timeoutMs) {
 					resolve();
 				} else {
 					requestAnimationFrame(check);
 				}
 			};
-	
+
 			check();
 		});
 	}
@@ -607,6 +713,15 @@ export default class ChatNotesPlugin extends Plugin {
 		  `${config.messageCornerRadius}px`
 		);
 
+		// the input field intentionally stays rounder ("pill" shaped) than the message
+		// bubbles, but tracks the same setting with a fixed offset so both scale together.
+		// Named --chat-input-radius (not --input-radius) since Obsidian's own theme
+		// already defines --input-radius globally for every native input/button.
+		container.style.setProperty(
+			"--chat-input-radius",
+			`${(config.messageCornerRadius ?? 12) + 8}px`
+		);
+
 		if (config.enableButtonShadow) {
 			container.classList.remove("menu-btn-no-shadow");
 		} else {
@@ -617,6 +732,24 @@ export default class ChatNotesPlugin extends Plugin {
 			container.style.setProperty(
 				"--settings-msg-flash-color",
 				config.messageFlashColor
+			);
+		}
+
+		if (config.messageReplyColor){
+			container.style.setProperty(
+				"--settings-msg-reply-color",
+				config.messageReplyColor
+			);
+			container.style.setProperty(
+				"--settings-msg-reply-text-color",
+				getReadableTextColor(config.messageReplyColor)
+			);
+		}
+
+		if (config.messageBorderColor){
+			container.style.setProperty(
+				"--settings-msg-border-color",
+				config.messageBorderColor
 			);
 		}
 
@@ -663,8 +796,10 @@ export default class ChatNotesPlugin extends Plugin {
 			const result = createChatInput(this);
 			this.chatInputEl = result.container;
 			this.chatTextareaEl = result.textarea;
+			this.chatReplyBannerEl = result.replyBanner;
+			this.chatReplyTextEl = result.replyText;
 		}
-	
+
 		return this.chatInputEl;
 	}
 

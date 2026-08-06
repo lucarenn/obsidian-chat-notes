@@ -7,6 +7,26 @@ export function isChatFile(app: App, file: TFile): boolean {
 	return cache?.frontmatter?.type === "chat";
 }
 
+/* Picks black or white text for readable contrast against an arbitrary user-chosen hex
+   background color, using the standard perceived-brightness formula (weights green
+   highest, blue lowest, matching human luminance sensitivity). */
+export function getReadableTextColor(hex: string): string {
+	const clean = hex.replace("#", "");
+	const full = clean.length === 3
+		? clean.split("").map(c => c + c).join("")
+		: clean;
+
+	const value = parseInt(full, 16);
+	if (full.length !== 6 || Number.isNaN(value)) return "#f5f5f5";
+
+	const r = (value >> 16) & 255;
+	const g = (value >> 8) & 255;
+	const b = value & 255;
+
+	const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+	return brightness > 150 ? "#1a1a1a" : "#f5f5f5";
+}
+
 export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
 	const preview = view.containerEl.querySelector(".markdown-preview-view");
 	const cmScroller = view.containerEl.querySelector(".cm-scroller");

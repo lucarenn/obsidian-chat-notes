@@ -1,6 +1,6 @@
-import { MarkdownRenderer, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
-import { ConfirmDeleteModal } from "./modals" 
-import { Message, CreateHTMLParams, CreateMenuParams } from "./types"
+import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
+import { ConfirmDeleteModal } from "./modals"
+import { Message, MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
 import { scrollDocument } from "./util"
 import type ChatNotesPlugin from "./main";
 
@@ -8,7 +8,31 @@ import type ChatNotesPlugin from "./main";
 export function createChatInput(plugin: ChatNotesPlugin) {
 	const container = createDiv("chat-input-container");
 
-	const textarea = container.createEl("textarea", {
+	/* Banner shown above the input row while a reply is pending; hidden (and removed
+	   from layout) whenever there is no active reply target. */
+	const replyBanner = container.createDiv("chat-input-reply-banner");
+
+	const replyIcon = replyBanner.createSpan("chat-input-reply-banner-icon");
+	setIcon(replyIcon, "corner-up-left");
+
+	const replyText = replyBanner.createSpan("chat-input-reply-banner-text");
+
+	const replyCancelBtn = replyBanner.createEl("button", {
+		cls: "chat-input-reply-cancel-btn"
+	});
+	replyCancelBtn.type = "button";
+	replyCancelBtn.setAttribute("aria-label", "Cancel reply");
+	setIcon(replyCancelBtn, "x");
+	replyCancelBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		void plugin.handleCancelReply();
+	});
+
+	/* Row holding the textarea and send button, kept separate from the container so the
+	   reply banner can sit above it without disturbing their existing flex layout. */
+	const inputRow = container.createDiv("chat-input-row");
+
+	const textarea = inputRow.createEl("textarea", {
 		cls: "chat-input"
 	});
 
@@ -43,6 +67,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		textarea.value = "";
 		plugin.getChatNote(file).inputCache = "";
 		resizeInput();
+
+		// a pending reply only applies to the message it was just sent with
+		void plugin.handleCancelReply();
 	};
 
 	// Obsidian's global hotkey scope can swallow "Mod+Enter" before it ever
@@ -57,14 +84,16 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 	textarea.addEventListener("focus", () => plugin.app.keymap.pushScope(sendScope));
 	textarea.addEventListener("blur", () => plugin.app.keymap.popScope(sendScope));
 
-	const button = container.createEl("button");
+	const button = inputRow.createEl("button");
 	button.className = "chat-send-button";
 	setIcon(button, "send");
 	button.onclick = sendMessage;
 
 	return {
 		container,
-		textarea
+		textarea,
+		replyBanner,
+		replyText
 	};
 }
 
@@ -122,10 +151,20 @@ export function addScrollMsgButton(view: MarkdownView,
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, onToggle, onHighlight} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, isReplyTarget, onToggle, onHighlight, onReplyToggle, onScrollToReply} : CreateHTMLParams){
+
+	// row reserves a fixed gutter (via wrapper's margin-right, see styles.css) so the
+	// reply button always has room inside the row's own box - it never needs to escape
+	// into space outside the message column, which isn't reliably clipping-free across
+	// reading view / live preview / window widths. Hover is bound to the row (not just
+	// the bubble) so the whole bubble+gutter+button strip is one continuous hover zone.
+	const row = document.createElement("div");
+	row.className = "chat-message-row";
 
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
+	wrapper.classList.toggle("chat-message-reply-target", isReplyTarget);
+
 	const content = document.createElement("div");
 	content.className = "message-content";
 
@@ -142,12 +181,146 @@ export function createElementsHTML({plugin, ctx, msg, author_text, onToggle, onH
 
 	/* Create message header and add menu buttons to header */
 	const header = createMessageHeader(`${author_text}`, `${msg.header.timestamp}`,  menu);
+
+	/* Seamless banner shown when this message is a reply to another one */
+	const replyTargetId = msg.header.extra.reply_to;
+	if (replyTargetId) {
+		console.log("MEssage Reply")
+		const replyTargetEntry = context.messageMap.get(replyTargetId);
+		if (replyTargetEntry) {
+			const banner = createReplyBanner(replyTargetEntry, () => onScrollToReply(replyTargetId));
+			wrapper.append(banner);
+		}
+	}
+
 	wrapper.append(header, content);
+
+	/* Hover button, spans the full message height in the reserved gutter (see styles.css).
+	   The icon's own position is kept on screen while scrolling via attachStickyReplyIcon
+	   below, instead of disappearing along with the message top. */
+	const replyBtn = document.createElement("button");
+	replyBtn.className = "msg-reply-btn";
+	replyBtn.type = "button";
+	replyBtn.setAttribute("aria-label", "Reply to message");
+	replyBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		onReplyToggle(msg.header.id);
+	});
+
+	const replyBtnIcon = document.createElement("span");
+	replyBtnIcon.className = "msg-reply-btn-icon";
+	setIcon(replyBtnIcon, "reply");
+	replyBtn.append(replyBtnIcon);
+
+	attachStickyReplyIcon(row, replyBtn, replyBtnIcon, ctx);
+
+	row.append(wrapper, replyBtn);
 
 	return {
 		wrapper,
-		content
+		content,
+		row
 	}
+}
+
+/* Manually reproduces `position: sticky` for the reply icon via scroll tracking. CSS
+   sticky alone works in Reading View but goes inert in Live Preview, where Obsidian
+   mounts each message as a CodeMirror block widget nested inside flex containers
+   (.cm-sizer/.cm-scroller) rather than Reading View's flat DOM - tracking the scroll
+   position by hand sidesteps that ancestor chain entirely, so the icon behaves
+   identically in both view modes. Only active while the row is actually hovered
+   (i.e. while the button is visible), so idle messages carry no listener overhead. */
+function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLElement, ctx: MarkdownPostProcessorContext) {
+
+	let scroller: Element | null = null;
+	let rafId: number | null = null;
+
+	const update = () => {
+		rafId = null;
+		if (!scroller) return;
+
+		const scrollerRect = scroller.getBoundingClientRect();
+		const rowRect = row.getBoundingClientRect();
+		const OFFSET = 16;
+		// keeps the icon from ever resting flush against the message's own top edge,
+		// clear of Reading View's code-block "edit" button in that same corner
+		const TOP_INSET = 18;
+
+		const min = rowRect.top + TOP_INSET;
+		const max = rowRect.bottom - icon.offsetHeight;
+		const target = Math.min(Math.max(scrollerRect.top + OFFSET, min), max);
+
+		icon.style.transform = `translateY(${target - rowRect.top}px)`;
+	};
+
+	const scheduleUpdate = () => {
+		if (rafId !== null) return;
+		rafId = requestAnimationFrame(update);
+	};
+
+	const start = () => {
+		scroller = row.closest(".cm-scroller, .markdown-preview-view");
+		if (!scroller) return;
+
+		scroller.addEventListener("scroll", scheduleUpdate, { passive: true });
+		window.addEventListener("resize", scheduleUpdate, { passive: true });
+		update();
+	};
+
+	const stop = () => {
+		if (rafId !== null) {
+			cancelAnimationFrame(rafId);
+			rafId = null;
+		}
+		scroller?.removeEventListener("scroll", scheduleUpdate);
+		window.removeEventListener("resize", scheduleUpdate);
+		scroller = null;
+		icon.style.transform = "";
+	};
+
+	row.addEventListener("mouseenter", start);
+	row.addEventListener("mouseleave", stop);
+
+	// safety net: guarantees the scroll/resize listeners are torn down if the row is
+	// destroyed mid-hover (e.g. a full note re-render) without a mouseleave ever firing
+	const child = new MarkdownRenderChild(btn);
+	child.onunload = stop;
+	ctx.addChild(child);
+}
+
+function createReplyBanner(targetEntry: MessageEntry, onScroll: () => void): HTMLDivElement {
+
+	const banner = document.createElement("div");
+	banner.className = "msg-reply-banner";
+	banner.setAttribute("role", "button");
+	banner.tabIndex = 0;
+
+	const icon = document.createElement("span");
+	icon.className = "msg-reply-banner-icon";
+	setIcon(icon, "corner-up-left");
+
+	const text = document.createElement("span");
+	text.className = "msg-reply-banner-text";
+
+	const author = targetEntry.message.header.author || "Unknown";
+	const preview = targetEntry.message.content.trim().replace(/\s+/g, " ").slice(0, 80);
+	text.textContent = preview ? `${author}: ${preview}` : author;
+
+	banner.append(icon, text);
+
+	const scroll = (e: Event) => {
+		e.stopPropagation();
+		onScroll();
+	};
+	banner.addEventListener("click", scroll);
+	banner.addEventListener("keydown", (e) => {
+		if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault();
+			onScroll();
+		}
+	});
+
+	return banner;
 }
 
 function createMessageActionsMenu({

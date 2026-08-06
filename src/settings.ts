@@ -14,6 +14,8 @@ export interface ChatConfig {
 	author?: string;
 	messageHighlightColor?: string;
 	messageFlashColor?: string;
+	messageReplyColor?: string;
+	messageBorderColor?: string;
 	// add future settings (that can be overriden in yaml) here
 }
 
@@ -24,6 +26,8 @@ export interface ChatNotesPluginSettings extends ChatConfig {
     messageCornerRadius: number;
 	messageHighlightColor: string;
 	messageFlashColor: string;
+	messageReplyColor: string;
+	messageBorderColor: string;
 	inputMaxHeight: number;
 	// specify the variables that should appear in global settings
 }
@@ -34,6 +38,8 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
 	messageFlashColor: "white",
+	messageReplyColor: "#57467e",
+	messageBorderColor: "#808080",
 	inputMaxHeight: 200,
 	// add default values here
 };
@@ -83,6 +89,30 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.messageFlashColor)
 				.onChange(async (value) => {
 					this.plugin.settings.messageFlashColor = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
+		.setName("Reply banner color")
+		.setDesc("Determines the background color of the 'reply to' banner shown on messages that reply to another one")
+		.addColorPicker(color => {
+			color
+				.setValue(this.plugin.settings.messageReplyColor)
+				.onChange(async (value) => {
+					this.plugin.settings.messageReplyColor = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
+		.setName("Message border color")
+		.setDesc("Determines the outline color of message bubbles and the chat input field")
+		.addColorPicker(color => {
+			color
+				.setValue(this.plugin.settings.messageBorderColor)
+				.onChange(async (value) => {
+					this.plugin.settings.messageBorderColor = value;
 					await this.plugin.saveSettings();
 				});
 		});
@@ -141,7 +171,9 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		author: fm.author,
 		messageBgColor: fm.msgColor,
 		messageHighlightColor: fm.msgPinColor,
-		messageFlashColor: fm. msgFlashColor
+		messageFlashColor: fm. msgFlashColor,
+		messageReplyColor: fm.msgReplyColor,
+		messageBorderColor: fm.msgBorderColor
 	};
 }
 

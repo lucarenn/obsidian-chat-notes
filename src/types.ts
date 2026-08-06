@@ -145,8 +145,12 @@ export type CreateHTMLParams = {
 	ctx: MarkdownPostProcessorContext;
 	msg: Message;
 	author_text: string;
+	context: ArchiveContext;
+	isReplyTarget: boolean;
 	onToggle: (menu: HTMLElement) => void;
 	onHighlight: (msgId: string, isPinned: boolean) => void;
+	onReplyToggle: (msgId: string) => void;
+	onScrollToReply: (targetId: string) => void;
 };
 
 export type CreateMenuParams = {
@@ -265,6 +269,8 @@ export class ChatNote {
 		public lastId?: number,
 		public lastAuthor?: string,
 		public chatAuthor?: string,
+
+		public replyTo?: string,	// id of the message the next sent message will reply to
 
 	) {}
 

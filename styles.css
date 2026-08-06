@@ -1,28 +1,69 @@
 
 :root {
-    --msg-border-color: #ffffff3d;
+    /* structural default only - the actual color is user-configurable (global settings
+       or per-file YAML), applied dynamically as --settings-msg-border-color; this is
+       just the fallback for var(--settings-msg-border-color, ...) before that runs */
+    --msg-pad-x: 22px;
+    --msg-pad-top: 5px;
+    --msg-border-width: 1px;
+    --msg-reply-gutter: 44px;
+
+    /* prefixed (not just --input-*) because Obsidian's own theme already defines
+       --input-radius/--input-border-width globally for every native input/button -
+       reusing those names was silently reskinning all of Obsidian's UI, not just ours */
+    --chat-input-pad-x: 14px;
+    --chat-input-pad-y: 10px;
+    --chat-input-border-width: 1px;
+    --chat-input-radius: 28px;
 }
 
 /* --------------------------------*/
 /* MESSAGE BUBBLE AND CONTENT */
 /* --------------------------------*/
 
+/* Wraps the bubble + reply button as one continuous box: the gutter reserved by the
+   bubble's own margin-right (below) always lands inside this row's box, so the button
+   can never be clipped by an ancestor's overflow, regardless of reading/live-preview
+   mode or window width. Hovering the row (not just the bubble) keeps the button visible
+   while the mouse crosses the gutter on its way to it. */
+.chat-message-row {
+    display: block;
+    position: relative;
+}
+
 .chat-message {
     display: block;
     position: relative;
 
-    padding-top: 5px;
+    padding-top: var(--msg-pad-top);
     padding-bottom: 10px;
-    padding-left: 22px;
-    padding-right: 22px;
+    padding-left: var(--msg-pad-x);
+    padding-right: var(--msg-pad-x);
 
-    margin: 10px 0;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    margin-left: var(--msg-reply-gutter);
+    margin-right: var(--msg-reply-gutter);
     border-radius:  var(--settings-msg-corner-radius, 12px) !important;
     max-width: 100%;
-    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;  
+    background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
 
-    border: 1px solid var(--msg-border-color);
+    /* box-shadow instead of border: overflow:hidden below only clips this element's own
+       children (like the reply banner) at the padding edge, never the element's own
+       border - so a real border would stay visible as a thin ring behind the banner
+       instead of being covered by it. A box-shadow paints outside the box and isn't
+       subject to that clipping, so it wraps the banner seamlessly instead. */
+    box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #808080) !important;
     will-change: transform;
+    /* clips the reply banner's square top corners to this exact rounded silhouette (see
+       .msg-reply-banner) - stays seamless with the bubble's own curve at any radius */
+    overflow: hidden;
+}
+
+/* Highlight around the message currently targeted by the pending reply */
+.chat-message-reply-target {
+    outline: 2px solid var(--settings-msg-reply-color, #57467e);
+    outline-offset: 2px;
 }
 
 .chat-message.bump {
@@ -37,6 +78,14 @@
 
 /* Filter to hide messages that are not pinned */
 .hidden-by-pin-filter {
+    display: none !important;
+}
+
+/* The pin filter toggles hidden-by-pin-filter on the bubble (.chat-message), which now
+   lives inside .chat-message-row alongside the reply button as a sibling rather than a
+   parent - without this, a filtered-out message would leave its reply button floating
+   next to an otherwise invisible row. */
+.chat-message-row:has(.hidden-by-pin-filter) {
     display: none !important;
 }
 
@@ -286,18 +335,34 @@
     z-index: 100; /* prevent other themes from overlaying bars on top of the input field */
     pointer-events: auto;
     display: flex;
+    flex-direction: column; /* stacks the reply banner above the input row when active */
 
     margin-bottom: 1%;
-    padding-top: 10px;
-    padding-bottom: 10px;
-    padding-left: 14px;
-    padding-right: 14px;
-    min-height: 72px; 
-    gap: 8px;
+    padding-top: var(--chat-input-pad-y);
+    padding-bottom: var(--chat-input-pad-y);
+    padding-left: var(--chat-input-pad-x);
+    padding-right: var(--chat-input-pad-x);
+    gap: 6px;
 
     background: var(--background-primary);
-    border: 1px solid var(--msg-border-color); 
-    border-radius: 28px;
+    /* box-shadow instead of border - see .chat-message for why (overflow:hidden below
+       clips this element's own children, like the reply banner, but never its own
+       border, so a real border would show through as a thin ring behind the banner) */
+    box-shadow: 0 0 0 var(--chat-input-border-width) var(--settings-msg-border-color, #808080);
+    border-radius: var(--chat-input-radius);
+    /* clips the reply banner's square top corners to this exact rounded silhouette,
+       so it stays seamless with the container's own curve at any radius - matching two
+       separate border-radius values by hand would drift apart at larger radii instead */
+    overflow: hidden;
+}
+
+/* Row holding the textarea and send button; carries the layout .chat-input-container
+   used to apply directly, back when it could only ever have these two children. */
+.chat-input-row {
+    display: flex;
+    align-items: flex-end;
+    min-height: 48px;
+    gap: 8px;
 }
 
 .cm-contentContainer,
@@ -322,4 +387,199 @@ padding-bottom: 80px;
     flex-shrink: 0;
     position: relative;
     align-self: flex-end;
+}
+
+/* --------------------------------*/
+/* REPLIES */
+/* --------------------------------*/
+
+/* Hover button. Spans the full height of the message row within its reserved gutter
+   (see .chat-message's margin-right) so it's never clipped, and sits beside the bubble
+   without affecting its alignment - the bubble's own width/position never changes on
+   hover. No border/fill of its own - just a soft gradient that reads as an extension of
+   the bubble on the left, fading to nothing on the right. */
+.msg-reply-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--msg-reply-gutter);
+    height: 100%;
+
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0;
+
+    border: none !important;
+    box-shadow: none !important;
+    background: linear-gradient(to right,
+        rgba(127, 127, 127, 0.20) 0%,
+        rgba(127, 127, 127, 0.10) 30%,
+        transparent 82%) !important;
+
+    cursor: pointer;
+
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+.msg-reply-btn:hover {
+    box-shadow: inset 0 0.5px 0.5px 0.5px rgba(255, 255, 255, 0.09), 0 2px 4px 0 rgba(0, 0, 0, 0.15), 0 1px 1.5px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.2), 0 0 0 0 transparent !important;
+}
+
+/* The icon's vertical position is driven by JS (see attachStickyReplyIcon in ui.ts),
+   not CSS position:sticky - sticky works in Reading View but goes inert in Live Preview,
+   where Obsidian mounts each message inside a CodeMirror block widget nested in flex
+   containers rather than Reading View's flat DOM. The JS keeps it pinned near the top of
+   the visible scroll area, clamped within the message's own bounds, identically in both
+   view modes. No transition here - it needs to track scroll 1:1, not lag behind it. */
+.msg-reply-btn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+
+    border: none; 
+    border-radius: 50%;
+    background-color: transparent;
+    color: var(--text-muted);
+}
+
+.msg-reply-btn-icon svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* Hover is bound to the whole row (bubble + gutter + button), not just the bubble,
+   so moving the mouse from the bubble to the button never crosses a dead zone that
+   would hide it before it can be clicked. */
+.chat-message-row:hover .msg-reply-btn,
+.chat-message-reply-target .msg-reply-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Seamless banner shown on messages that reply to another message.
+   Negative margins pull it flush with the bubble's own edges/corners. */
+.msg-reply-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    margin: calc(-1 * (var(--msg-pad-top) + var(--msg-border-width)))
+            calc(-1 * (var(--msg-pad-x) + var(--msg-border-width)))
+            8px
+            calc(-1 * (var(--msg-pad-x) + var(--msg-border-width)));
+    padding: 6px 16px;
+
+    /* no border-radius of its own - .chat-message's own overflow:hidden clips this
+       banner's square top corners to the bubble's exact curve instead, which stays
+       seamless at any corner-radius setting (matching two radii by hand would drift
+       apart from each other at larger values) */
+    background-color: var(--settings-msg-reply-color, #57467e);
+    color: var(--settings-msg-reply-text-color, var(--text-normal));
+    font-size: 0.82em;
+    opacity: 0.9;
+
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.msg-reply-banner:hover {
+    opacity: 1;
+}
+
+.msg-reply-banner-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.msg-reply-banner-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.msg-reply-banner-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Banner shown above the chat input while a reply is pending. Hidden by default;
+   .is-visible is toggled on/off as the pending reply target changes. Mirrors
+   .msg-reply-banner: negative margins pull it flush with the input container's own
+   top/left/right edges (instead of sitting inset as a separate rounded row), reading as
+   a seamless cap on the container - no border-radius of its own, since .chat-input-
+   -container's own overflow:hidden clips its square top corners to the exact same
+   curve as the container's border, which stays correct at any radius. */
+.chat-input-reply-banner {
+    display: none;
+    align-items: center;
+    gap: 6px;
+
+    margin: calc(-1 * (var(--chat-input-pad-y) + var(--chat-input-border-width)))
+            calc(-1 * (var(--chat-input-pad-x) + var(--chat-input-border-width)))
+            0
+            calc(-1 * (var(--chat-input-pad-x) + var(--chat-input-border-width)));
+    padding: 5px 16px;
+
+    background-color: var(--settings-msg-reply-color, #57467e);
+    color: var(--settings-msg-reply-text-color, var(--text-normal));
+    font-size: 0.82em;
+    opacity: 0.9;
+}
+
+.chat-input-reply-banner.is-visible {
+    display: flex;
+}
+
+.chat-input-reply-banner-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.chat-input-reply-banner-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.chat-input-reply-banner-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-input-reply-cancel-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--settings-msg-reply-text-color, var(--text-normal));
+    cursor: pointer;
+    opacity: 0.75;
+}
+
+.chat-input-reply-cancel-btn:hover {
+    opacity: 1;
+    /* tints with the button's own (dynamically-picked) text color, so it stays a subtle
+       highlight instead of always assuming a dark banner background */
+    background-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.chat-input-reply-cancel-btn svg {
+    width: 13px;
+    height: 13px;
 }
