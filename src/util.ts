@@ -27,6 +27,68 @@ export function getReadableTextColor(hex: string): string {
 	return brightness > 150 ? "#1a1a1a" : "#f5f5f5";
 }
 
+/* Message ids are compared and incremented as decimal strings, never as numbers: an
+   imported Discord snowflake is 19 digits, well past the 15-16 digits a JS number holds
+   exactly, so `Number(maxId) + 1` there would silently land on an id that already exists
+   (or skip one). These three keep that arithmetic exact at any length. */
+
+export function isNumericId(id: string): boolean {
+	return /^\d+$/.test(id);
+}
+
+function stripLeadingZeros(value: string): string {
+	const trimmed = value.replace(/^0+/, "");
+	return trimmed === "" ? "0" : trimmed;
+}
+
+/* Numeric ordering of two digit-strings: the longer number wins, and equal lengths can
+   be compared lexicographically because digits sort in the same order as their values. */
+export function compareNumericIds(a: string, b: string): number {
+	const left = stripLeadingZeros(a);
+	const right = stripLeadingZeros(b);
+
+	if (left.length !== right.length) return left.length - right.length;
+	if (left === right) return 0;
+	return left < right ? -1 : 1;
+}
+
+/* Schoolbook carry, so it stays exact however long the id is. */
+export function incrementNumericId(value: string): string {
+	const digits = stripLeadingZeros(value).split("");
+
+	for (let index = digits.length - 1; index >= 0; index--) {
+		const digit = Number(digits[index] ?? "0") + 1;
+
+		if (digit < 10) {
+			digits[index] = String(digit);
+			return digits.join("");
+		}
+
+		digits[index] = "0"; // carry into the next column up
+	}
+
+	// every column carried (999 -> 1000), so the number gained a digit
+	return "1" + digits.join("");
+}
+
+/* Accepted shape for a manually entered message time: DD.MM.YYYY with an optional
+   HH:MM, leading zeros optional - so "6.8.2026 14:33" and "06.08.2026" both pass. */
+export const TIMESTAMP_PATTERN = /^\d{1,2}\.\d{1,2}\.\d{4}( \d{1,2}:\d{2})?$/;
+export const TIMESTAMP_PLACEHOLDER = "DD.MM.YYYY HH:MM";
+
+export function isValidTimestamp(value: string): boolean {
+	return TIMESTAMP_PATTERN.test(value.trim());
+}
+
+/* Current local time in the same dotted format the time input accepts - the default
+   timestamp for any message whose header the user didn't edit. */
+export function formatTimestamp(date: Date = new Date()): string {
+	const pad = (value: number) => String(value).padStart(2, "0");
+
+	return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`
+		+ ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
 	const preview = view.containerEl.querySelector(".markdown-preview-view");
 	const cmScroller = view.containerEl.querySelector(".cm-scroller");

@@ -1,8 +1,8 @@
 import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile } from "obsidian";
-import { Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
+import { Header, Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor } from "./util"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor, formatTimestamp } from "./util"
 
 export default class ChatNotesPlugin extends Plugin {
 	
@@ -36,11 +36,18 @@ export default class ChatNotesPlugin extends Plugin {
 		const source = await this.app.vault.read(file);
 		const [messages, pinnedMessagecount] = parseMessages(source);
 
-		return new ArchiveContext(
+		const context = new ArchiveContext(
 			file,
 			messages,
 			pinnedMessagecount
 		);
+
+		// the message-derived fields are filled in by the constructor; these come from
+		// the config instead, so they'd otherwise stay at their defaults until the first
+		// YAML change
+		this.applyConfigToContext(context, this.getConfigCache(file));
+
+		return context;
 	}
 
 	async onload() {
@@ -217,7 +224,7 @@ export default class ChatNotesPlugin extends Plugin {
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
 				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
 				if (note.lastAppliedConfig !== note.configCache) {
-					await this.applyConfigStylesToFile(file);
+					await this.applyConfigToFile(file);
 					note.lastAppliedConfig = note.configCache;
 				}
 
@@ -324,9 +331,9 @@ export default class ChatNotesPlugin extends Plugin {
 		this.getChatNote(file).isChatNote = currentStatus;
 
 		if (currentStatus && (currentStatus === previousStatus)) {
-			// chat file YAML was changed -> apply styles
-			// TODO: detect and update other new settings (not just styles)
-			await this.applyConfigStylesToFile(file);
+			// chat file YAML was changed -> apply styles AND the non-style settings
+			// (chat owner, default-author mode), which live on the archive context
+			await this.applyConfigToFile(file);
 
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
@@ -551,12 +558,50 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	async appendMessage(file: TFile, content: string) {
-		// TODO: create and save standart header for every chat? map?
-		// const chat_header = new Header();
-		// const msg = new Message(chat_header, content);
-		await this.app.vault.append(file, "test");
+	/* Builds a full message (header + content) and appends it to the file. `overrides`
+	   carries whatever the user typed into the input's header row; anything left empty
+	   there falls back to the configured default. */
+	async appendMessage(file: TFile, content: string, overrides?: {
+		author?: string;
+		timestamp?: string;
+	}) {
+		const context = await this.getArchiveContext(file);
+		const note = this.getChatNote(file);
 
+		const extra: Record<string, string> = {};
+		if (note.replyTo) {
+			extra.reply_to = note.replyTo;		// key the renderer already reads
+		}
+
+		const header = new Header(
+			context.nextMessageId(),
+			overrides?.author || context.resolveDefaultAuthor(),
+			overrides?.timestamp || formatTimestamp(),
+			extra
+		);
+
+		const message = Message.create(header, content);
+		const raw = message.toString();
+
+		const data = await this.app.vault.read(file);
+		// guarantee the block opens on its own line, whatever the file happened to end with
+		const prefix = data.endsWith("\n") ? data : data + "\n";
+
+		const startLine = prefix.split("\n").length - 1;
+		const blockLines = raw.split("\n");
+
+		// registered before the write, not after: modify() makes the codeblock processor
+		// rerun, and it throws if the context has no entry for the block it's rendering
+		context.addMessage({
+			id: header.id,
+			message,
+			startLine,
+			// lastIndexOf, so a "````" line inside the content can't be mistaken for the
+			// closing fence - the real one is always last
+			endLine: startLine + blockLines.lastIndexOf("````")
+		});
+
+		await this.app.vault.modify(file, prefix + raw);
 	}
 
 	async showPinnedMessagesOnly(){
@@ -758,6 +803,14 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
+	/* The config that isn't CSS. applyStyles pushes the visual settings onto the DOM
+	   container and lets them cascade; these are plain values the message-building code
+	   reads instead, so they need their own path onto the context. */
+	applyConfigToContext(context: ArchiveContext, config: ChatConfig) {
+		context.chatAuthor = config.author;
+		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
+	}
+
 	applyMessageHighlightStyle(msg: HTMLElement, config: ChatConfig, isPinned: boolean){
 		// override the background color for highlighted Messages
 
@@ -773,14 +826,21 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 	}
 
-	async applyConfigStylesToFile(file: TFile){
-		// get all html containers of the open file and call applyScopedStyles on them with their current config
+	async applyConfigToFile(file: TFile){
+		// push the file's current config to its archive context (non-CSS settings) and to
+		// every html container it's open in (the CSS variables)
 
-		console.log("applying styles to containers")
+		console.log("applying config to file")
+		const config = this.getConfigCache(file);
+		const context = await this.getArchiveContext(file);
+
+		// before the container check on purpose: the context still needs the new config
+		// even when the file isn't open in any view right now
+		this.applyConfigToContext(context, config);
+
 		const allContainers = getActiveContainers(this.app, file)
 		if (!allContainers) return;
-		const config = this.getConfigCache(file)!;
-		const context = await this.getArchiveContext(file);
+
 		for (const fileContainers of allContainers) {
 			for (const container of fileContainers) {
 					await this.applyStyles(container, config, context);

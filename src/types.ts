@@ -1,5 +1,6 @@
 import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
-import { ChatConfig } from "./settings";
+import { ChatConfig, DefaultAuthorMode } from "./settings";
+import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
 import ChatNotesPlugin from "./main"
 
 
@@ -11,6 +12,18 @@ export class ArchiveContext {
 	pinnedMessagesAmount: number;
 	filterPinnedOnly: boolean;
 
+	/* Derived from the messages themselves, so refreshMessageIndex rebuilds them whenever
+	   the message set changes: everyone who has posted, whoever posted last, and the
+	   highest numeric id in the file (a decimal string - see incrementNumericId). */
+	authors: Set<string> = new Set();
+	lastAuthor?: string;
+	maxMessageId = "0";
+
+	/* Mirrored from the resolved config (global settings + YAML overrides) instead, so
+	   these are refreshed by applyConfigToContext when the config changes - not here. */
+	chatAuthor?: string;
+	defaultAuthorMode: DefaultAuthorMode = "owner";
+
     constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>, pinnedMessages?: number) {
         this.file = file;
 		// this.messages = msgEntries;
@@ -18,7 +31,63 @@ export class ArchiveContext {
 		this.renderedElements = new Map();
 		this.pinnedMessagesAmount = pinnedMessages ?? 0;
 		this.filterPinnedOnly = false;
+		this.refreshMessageIndex();
     }
+
+	/* messageMap preserves the file's own message order (parseMessages inserts them top
+	   to bottom), so the last entry carrying an author is the chat's most recent one. */
+	refreshMessageIndex() {
+		const authors = new Set<string>();
+		let lastAuthor: string | undefined;
+		let maxMessageId = "0";
+
+		for (const entry of this.messageMap.values()) {
+			const author = entry.message.header.author.trim();
+			if (author) {
+				authors.add(author);
+				lastAuthor = author;
+			}
+
+			// a non-numeric id simply doesn't take part in the maximum
+			const id = entry.message.header.id.trim();
+			if (isNumericId(id) && compareNumericIds(id, maxMessageId) > 0) {
+				maxMessageId = id;
+			}
+		}
+
+		this.authors = authors;
+		this.lastAuthor = lastAuthor;
+		this.maxMessageId = maxMessageId;
+	}
+
+	/* Id for the next message: one past the highest already in the file. */
+	nextMessageId(): string {
+		return incrementNumericId(this.maxMessageId);
+	}
+
+	/* The author a new message is written with when the input's author field is left
+	   empty. Each mode falls back to the other, so a brand new chat still resolves to the
+	   owner and a chat with no owner set still resolves to whoever posted last. */
+	resolveDefaultAuthor(): string {
+		if (this.defaultAuthorMode === "previous") {
+			return this.lastAuthor ?? this.chatAuthor ?? "";
+		}
+
+		return this.chatAuthor ?? this.lastAuthor ?? "";
+	}
+
+	/* Registers a freshly appended message, keeping the context in step with the file
+	   without a full reparse. `element` is left unset - the codeblock processor fills it
+	   in when it renders the new block. */
+	addMessage(entry: MessageEntry) {
+		this.messageMap.set(entry.id, entry);
+
+		if (entry.message.header.extra.pinned === "true") {
+			this.pinnedMessagesAmount += 1;
+		}
+
+		this.refreshMessageIndex();
+	}
 
 	getEntry(id: string): MessageEntry {
         const entry = this.messageMap.get(id);
@@ -191,9 +260,11 @@ export class Header {
 			id,
 			data["author"] ?? "",
 			data["timestamp"] ?? "",
+			// every field that has its own slot on Header must be excluded here, or it
+			// ends up in `extra` as well and toString() emits the line twice
 			Object.fromEntries(
 				Object.entries(data).filter(
-					([k]) => k !== "author" && k !== "timestamp"
+					([k]) => k !== "id" && k !== "author" && k !== "timestamp"
 				)
 			)
 		);
@@ -226,6 +297,21 @@ export class Message {
         return this;
     }
 
+	/* A stored body always opens and closes with a blank line, matching how imported
+	   messages are written - which is what keeps a fromString/toString round trip stable. */
+	private static normalizeContent(content: string): string {
+		let normalized = content;
+		if (!normalized.startsWith("\n")) normalized = "\n" + normalized;
+		if (!normalized.endsWith("\n")) normalized += "\n";
+		return normalized;
+	}
+
+	/* Builds a message from scratch (as opposed to parsing one out of a file), applying
+	   the same body normalization fromString does. */
+	static create(header: Header, content: string): Message {
+		return new Message(header, Message.normalizeContent(content));
+	}
+
 	static fromString(rawMessage: string): Message {
 		// expxts rawMessage to NOT contain the codeblock seperators (````chat-message and ````)
 		const lines = rawMessage.trim().split("\n");
@@ -240,11 +326,10 @@ export class Message {
 		const contentLines = lines.slice(separatorIndex + 1);
 		const header = Header.fromLines(headerLines);
 
-        let content = contentLines.join("\n");
-        if (!content.startsWith("\n")) content = "\n" + content;
-        if (!content.endsWith("\n")) content += "\n";
-
-		return new Message(header, content);
+		return new Message(
+			header,
+			Message.normalizeContent(contentLines.join("\n"))
+		);
 	}
 
 	toString(): string {

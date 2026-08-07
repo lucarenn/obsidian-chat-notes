@@ -15,6 +15,9 @@
     --chat-input-pad-y: 10px;
     --chat-input-border-width: 1px;
     --chat-input-radius: 28px;
+    /* breathing room around the textarea so its focus ring isn't clipped - the send
+       button takes the same inset so the two stay level (see .chat-input-row) */
+    --chat-input-inset: 2px;
 }
 
 /* --------------------------------*/
@@ -365,6 +368,110 @@
     gap: 8px;
 }
 
+/* Collapsible header-override area (author + time for the next sent message), sitting
+   between the reply banner and the input row. Collapsed it is nothing but the slim "···"
+   strip; the row below it expands on hover of this whole area, while pinned open by the
+   button (.is-pinned), or while a field inside is focused or filled (.is-active - set
+   from JS, since neither state is expressible in CSS from this element). */
+.chat-input-header-area {
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-input-expander {
+    width: 100%;
+    height: 12px;
+    min-height: 0;
+    padding: 0;
+    flex-shrink: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    /* !important throughout: Obsidian's theme styles every native <button> by default */
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    cursor: pointer;
+
+    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 1;
+    letter-spacing: 2px;
+    transition: color 120ms ease;
+}
+
+.chat-input-expander:hover,
+.chat-input-header-area.is-pinned .chat-input-expander {
+    color: var(--text-muted);
+}
+
+/* max-height rather than display:none so the reveal can animate - the value is an upper
+   bound the single row never actually reaches, not its real height */
+.chat-input-extra-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 160ms ease, opacity 160ms ease, margin-top 160ms ease;
+} 
+
+.chat-input-header-area:hover .chat-input-extra-row,
+.chat-input-header-area.is-pinned .chat-input-extra-row,
+.chat-input-header-area.is-active .chat-input-extra-row {
+    max-height: 60px;
+    opacity: 1;
+    margin-top: 4px;
+}
+
+/* Dismissed with the "···" button. Outranks the sticky states above (one class deeper,
+   so it wins regardless of source order) but not hover, which stays a way to peek at the
+   still-pending override without un-dismissing it. .is-dismissing overrides the hover too,
+   for the moment between the click and the pointer leaving the area - see setHeaderAreaCollapsed. */
+.chat-input-header-area.is-collapsed:not(:hover) .chat-input-extra-row,
+.chat-input-header-area.is-collapsed.is-dismissing .chat-input-extra-row {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.chat-input-extra-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    padding: 2px;
+}
+
+/* a fixed-format timestamp needs far less room than a free-form author name */
+.chat-input-extra-field-time {
+    flex: 0 1 200px;
+}
+
+.chat-input-extra-label {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 0.78em;
+}
+
+.chat-input-extra-input {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.85em;
+}
+
+/* advisory only - an unparseable timestamp is flagged, never blocked from sending */
+.chat-input-extra-input.is-invalid {
+    box-shadow: 0 0 0 1px var(--text-error);
+}
+
 .cm-contentContainer,
 .markdown-preview-sizer {
 padding-bottom: 80px;
@@ -378,15 +485,19 @@ padding-bottom: 80px;
 .chat-input {
     flex: 1;
     resize: none;
-    margin: 2px;
+    margin: var(--chat-input-inset);
     overflow-y: auto;
     min-height: 48px; /* keeps the original baseline height even when content/JS height is smaller */
 }
 
+/* same bottom inset as the textarea: the row bottom-aligns both, so without it the
+   button would sit that much lower than the field it belongs to */
 .chat-send-button {
     flex-shrink: 0;
     position: relative;
     align-self: flex-end;
+    height: 48px;
+    margin-bottom: var(--chat-input-inset);
 }
 
 /* --------------------------------*/

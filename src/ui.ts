@@ -1,7 +1,7 @@
 import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
 import { ConfirmDeleteModal } from "./modals"
 import { Message, MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
-import { scrollDocument } from "./util"
+import { scrollDocument, isValidTimestamp, TIMESTAMP_PLACEHOLDER } from "./util"
 import type ChatNotesPlugin from "./main";
 
 
@@ -27,6 +27,157 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		e.stopPropagation();
 		void plugin.handleCancelReply();
 	});
+
+	/* Collapsible header row, letting the user override the author/timestamp the next
+	   sent message is written with. Collapsed to just a slim "···" affordance so it stays
+	   out of the way while typing; see the reveal wiring below for when it opens. */
+	const headerArea = container.createDiv("chat-input-header-area");
+
+	const expander = headerArea.createEl("button", {
+		cls: "chat-input-expander"
+	});
+	expander.type = "button";
+	expander.textContent = "···";
+	expander.setAttribute("aria-label", "Message header options");
+	expander.setAttribute("aria-expanded", "false");
+
+	const extraRow = headerArea.createDiv("chat-input-extra-row");
+
+	/* Native <input list=...> combobox: accepts a brand new name as free text while
+	   offering the file's existing authors as a dropdown, rather than forcing a choice
+	   between the two. */
+	const authorField = extraRow.createDiv("chat-input-extra-field");
+	authorField.createEl("label", {
+		cls: "chat-input-extra-label",
+		text: "Author"
+	});
+
+	const authorInput = authorField.createEl("input", {
+		cls: "chat-input-extra-input"
+	});
+	authorInput.type = "text";
+
+	const authorList = authorField.createEl("datalist");
+	authorList.id = `chat-author-list-${Date.now().toString(36)}`;
+	authorInput.setAttribute("list", authorList.id);
+
+	const timeField = extraRow.createDiv("chat-input-extra-field chat-input-extra-field-time");
+	timeField.createEl("label", {
+		cls: "chat-input-extra-label",
+		text: "Time"
+	});
+
+	const timeInput = timeField.createEl("input", {
+		cls: "chat-input-extra-input"
+	});
+	timeInput.type = "text";
+	timeInput.placeholder = TIMESTAMP_PLACEHOLDER;
+
+	/* Holds the row open past the hover in the two cases where collapsing it would fight
+	   the user: while something inside has focus (the author dropdown would otherwise
+	   vanish the moment the mouse left the row) and while either field holds a value, so
+	   a pending override is never hidden from the person who typed it. */
+	const updateHeaderAreaState = () => {
+		const hasValue =
+			authorInput.value.trim() !== "" || timeInput.value.trim() !== "";
+		// the fields only, not the whole area: clicking the "···" button focuses it, and
+		// counting that as focus would make the button read its own click as a sticky
+		// open state and answer it with a dismissal every time (see expander.onclick)
+		const hasFocus = extraRow.contains(document.activeElement);
+
+		headerArea.classList.toggle("is-active", hasValue || hasFocus);
+	};
+
+	const setHeaderAreaPinned = (pinned: boolean) => {
+		headerArea.classList.toggle("is-pinned", pinned);
+		expander.setAttribute("aria-expanded", String(pinned));
+	};
+
+	/* Dismissal: the counterpart to .is-active, letting the user close a row that a typed
+	   override would otherwise hold open forever - without clearing what was typed, which
+	   stays live and still applies to the next message sent. Hover keeps working as a peek
+	   at the pending values while dismissed. */
+	const setHeaderAreaCollapsed = (collapsed: boolean) => {
+		headerArea.classList.toggle("is-collapsed", collapsed);
+		if (!collapsed) headerArea.classList.remove("is-dismissing");
+	};
+
+	/* Dismissing by click happens with the pointer necessarily inside the area, where the
+	   hover peek would otherwise keep the row open and make the button look inert. This
+	   suspends the peek for exactly that stretch, so the row shuts under the mouse. */
+	headerArea.addEventListener("pointerleave", () =>
+		headerArea.classList.remove("is-dismissing"));
+
+	expander.onclick = (e) => {
+		e.stopPropagation();
+
+		/* Clicking while the row is held open by anything other than the hover itself reads
+		   as "close this", since the hover already shows it - so the button only ever pins
+		   when there is nothing to dismiss. */
+		const stickyOpen =
+			headerArea.classList.contains("is-pinned") ||
+			headerArea.classList.contains("is-active");
+
+		if (headerArea.classList.contains("is-collapsed")) {
+			setHeaderAreaCollapsed(false);
+			setHeaderAreaPinned(true);
+			return;
+		}
+
+		if (stickyOpen) {
+			setHeaderAreaPinned(false);
+			setHeaderAreaCollapsed(true);
+			headerArea.classList.add("is-dismissing");
+			// a focused field inside the now-hidden row would swallow every keystroke
+			if (extraRow.contains(document.activeElement)) textarea.focus();
+			return;
+		}
+
+		setHeaderAreaPinned(true);
+	};
+
+	headerArea.addEventListener("focusin", updateHeaderAreaState);
+	// focusout fires before the next element takes focus, so re-check on the following tick
+	headerArea.addEventListener("focusout", () => window.setTimeout(updateHeaderAreaState, 0));
+
+	authorInput.addEventListener("input", updateHeaderAreaState);
+
+	timeInput.addEventListener("input", () => {
+		const value = timeInput.value.trim();
+		// flagged, never rejected - an odd timestamp still beats blocking the send
+		timeInput.classList.toggle("is-invalid", value !== "" && !isValidTimestamp(value));
+		updateHeaderAreaState();
+	});
+
+	/* Suggestions and the placeholder (which advertises the author that sending right now
+	   would use) are pulled fresh each time the row opens: both shift as messages are
+	   added, files switched, or YAML overrides edited, and this is the only moment either
+	   is actually on screen. */
+	const refreshHeaderFields = async () => {
+		const file = plugin.app.workspace.getActiveFile();
+		if (!file || !plugin.getIsChatNote(file)) return;
+
+		const context = await plugin.getArchiveContext(file);
+
+		authorList.empty();
+		for (const name of context.authors) {
+			authorList.createEl("option", { attr: { value: name } });
+		}
+
+		authorInput.placeholder = context.resolveDefaultAuthor() || "Author";
+	};
+
+	headerArea.addEventListener("pointerenter", () => void refreshHeaderFields());
+	authorInput.addEventListener("focus", () => void refreshHeaderFields());
+
+	const resetHeaderFields = () => {
+		authorInput.value = "";
+		timeInput.value = "";
+		timeInput.classList.remove("is-invalid");
+		// nothing left to hold the row open, so the dismissal has nothing left to suppress
+		setHeaderAreaCollapsed(false);
+		updateHeaderAreaState();
+	};
 
 	/* Row holding the textarea and send button, kept separate from the container so the
 	   reply banner can sit above it without disturbing their existing flex layout. */
@@ -62,27 +213,82 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		const value = textarea.value.trim();
 		if (!value) return;
 
-		await plugin.appendMessage(file, value);
+		// empty string -> undefined, so appendMessage falls back to the configured default
+		await plugin.appendMessage(file, value, {
+			author: authorInput.value.trim() || undefined,
+			timestamp: timeInput.value.trim() || undefined
+		});
 
 		textarea.value = "";
 		plugin.getChatNote(file).inputCache = "";
 		resizeInput();
 
+		// header overrides apply to the message they were typed for and nothing after it;
+		// the next message re-derives both from the configured defaults
+		resetHeaderFields();
+
 		// a pending reply only applies to the message it was just sent with
 		void plugin.handleCancelReply();
+	};
+
+	/* Keyboard route into the header overrides, mirroring what hovering the area does with
+	   the mouse: Mod+Up from the textarea opens the row and puts the caret in Author,
+	   Mod+Up (or Escape) from either field closes it and hands focus back to the textarea.
+	   It pins rather than merely focusing, so the row stays open if the user then clicks
+	   away - the same end state the "···" button produces. */
+	const openHeaderArea = () => {
+		setHeaderAreaPinned(true);
+		// focusing the author field also refreshes the suggestions/placeholder (see above)
+		authorInput.focus();
+		authorInput.select();
+	};
+
+	const closeHeaderArea = () => {
+		setHeaderAreaPinned(false);
+		// same dismissal the "···" button performs, so the row really closes even with a
+		// value typed - the keyboard route would otherwise be a no-op in exactly that case
+		setHeaderAreaCollapsed(true);
+		textarea.focus();
 	};
 
 	// Obsidian's global hotkey scope can swallow "Mod+Enter" before it ever
 	// reaches a plain keydown listener (e.g. if some other command already
 	// claims that combo). Registering our own scope and pushing it while
 	// the input is focused makes our binding take priority instead.
+	// Mod+Up needs this doubly: it is bound globally to "Scroll to Top", which it
+	// keeps doing everywhere except while one of these fields holds focus.
 	const sendScope = new Scope(plugin.app.scope);
 	sendScope.register(["Mod"], "Enter", () => {
 		void sendMessage();
 		return false; // auto preventDefault, stops a newline from being inserted
 	});
+	sendScope.register(["Mod"], "ArrowUp", () => {
+		openHeaderArea();
+		return false;
+	});
 	textarea.addEventListener("focus", () => plugin.app.keymap.pushScope(sendScope));
 	textarea.addEventListener("blur", () => plugin.app.keymap.popScope(sendScope));
+
+	const headerScope = new Scope(plugin.app.scope);
+	headerScope.register(["Mod"], "ArrowUp", () => {
+		closeHeaderArea();
+		return false;
+	});
+	headerScope.register([], "Escape", () => {
+		closeHeaderArea();
+		return false;
+	});
+
+	for (const field of [authorInput, timeInput]) {
+		// blur always fires before the next element's focus, so moving between the two
+		// fields pops and re-pushes in order rather than stacking the scope twice
+		field.addEventListener("focus", () => {
+			plugin.app.keymap.pushScope(headerScope);
+			// deliberately back in the row, so an earlier dismissal no longer applies
+			setHeaderAreaCollapsed(false);
+		});
+		field.addEventListener("blur", () => plugin.app.keymap.popScope(headerScope));
+	}
 
 	const button = inputRow.createEl("button");
 	button.className = "chat-send-button";
@@ -185,7 +391,6 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, isRe
 	/* Seamless banner shown when this message is a reply to another one */
 	const replyTargetId = msg.header.extra.reply_to;
 	if (replyTargetId) {
-		console.log("MEssage Reply")
 		const replyTargetEntry = context.messageMap.get(replyTargetId);
 		if (replyTargetEntry) {
 			const banner = createReplyBanner(replyTargetEntry, () => onScrollToReply(replyTargetId));

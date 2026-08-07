@@ -3,10 +3,16 @@ import ChatNotesPlugin from "./main";
 
 
 
+/* Which author a new message defaults to when the input's author field is left empty:
+   the file's chat owner (the YAML `author` key) or whoever sent the previous message. */
+export type DefaultAuthorMode = "owner" | "previous";
+
+
 export interface ChatConfig {
-	// holds all possible settings for a chat to override global settings 
+	// holds all possible settings for a chat to override global settings
 	// (can contain more than global settings)
 
+	defaultAuthorMode?: DefaultAuthorMode;
 	messageBgColor?: string;
 	enableButtonShadow?: boolean;
     messageCornerRadius?: number;
@@ -29,6 +35,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	messageReplyColor: string;
 	messageBorderColor: string;
 	inputMaxHeight: number;
+	defaultAuthorMode: DefaultAuthorMode;
 	// specify the variables that should appear in global settings
 }
 
@@ -41,6 +48,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageReplyColor: "#57467e",
 	messageBorderColor: "#808080",
 	inputMaxHeight: 200,
+	defaultAuthorMode: "owner",
 	// add default values here
 };
 
@@ -143,6 +151,20 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Default message author")
+		.setDesc("Which author a new message is sent as when its author field is left empty. Override per file with 'msgDefaultAuthor: owner' or 'msgDefaultAuthor: previous'; the chat owner itself is the file's 'author' YAML key.")
+		.addDropdown(dropdown => {
+			dropdown
+				.addOption("owner", "Chat owner")
+				.addOption("previous", "Previous message's author")
+				.setValue(this.plugin.settings.defaultAuthorMode)
+				.onChange(async (value) => {
+					this.plugin.settings.defaultAuthorMode = value as DefaultAuthorMode;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Max input field height")
 		.setDesc("Determines how tall the message input field can grow before it starts scrolling")
 		.addSlider(slider => {
@@ -164,11 +186,20 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const fm = cache?.frontmatter;
   
 	if (!fm) return {};
-  	
+
+	// YAML holds whatever the user typed, so only a recognised mode counts as an
+	// override - a typo falls through to the global setting instead of silently
+	// resolving to something the user never picked
+	const defaultAuthorMode: DefaultAuthorMode | undefined =
+		fm.msgDefaultAuthor === "owner" || fm.msgDefaultAuthor === "previous"
+			? fm.msgDefaultAuthor
+			: undefined;
+
 	// set variable alias names for the yaml overrides here:
 	return {
 		chatId: fm.chatId,
-		author: fm.author,
+		author: fm.author,			// the chat owner - yaml only, never a global setting
+		defaultAuthorMode,
 		messageBgColor: fm.msgColor,
 		messageHighlightColor: fm.msgPinColor,
 		messageFlashColor: fm. msgFlashColor,
