@@ -8,6 +8,10 @@ import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, 
    appended if the folder already holds one. */
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
 
+/* How long "Scroll to bottom on send" keeps the view pinned to the end while the message
+   it was sent for renders and settles (see scrollToBottomAfterSend). */
+const SCROLL_ON_SEND_PIN_MS = 500;
+
 export default class ChatNotesPlugin extends Plugin {
 
 	openMenu: HTMLElement | null = null;
@@ -657,12 +661,11 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Builds a full message (header + content) and appends it to the file. `overrides`
 	   carries whatever the user typed into the input's header row; anything left empty
-	   there falls back to the configured default. Returns the new message's id, which
-	   callers need to follow it once the codeblock processor has rendered it. */
+	   there falls back to the configured default. */
 	async appendMessage(file: TFile, content: string, overrides?: {
 		author?: string;
 		timestamp?: string;
-	}): Promise<string> {
+	}) {
 		const context = await this.getArchiveContext(file);
 		const note = this.getChatNote(file);
 
@@ -700,35 +703,38 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 
 		await this.app.vault.modify(file, prefix + raw);
-
-		return header.id;
 	}
 
 	/* Jump to the end of the chat after a message was sent (the "Scroll to bottom on send"
-	   setting). Firing the plain scroll right away would race the render: vault.modify only
-	   schedules the codeblock processor, so the document is still its old height at that
-	   point - and in Live Preview CodeMirror has not mounted the new block at all yet.
-	   Waiting for the new message's own element to appear first anchors the jump to a
-	   document that actually contains it. */
-	async scrollToBottomAfterSend(file: TFile, messageId: string) {
+	   setting). A single jump would land at the document's *old* bottom: vault.modify only
+	   schedules the codeblock processor, so at this point the new message has neither been
+	   rendered nor added its height. Waiting for it to render first is not the answer
+	   either - both view modes only render near the viewport, so a message appended below
+	   the fold renders *because* something scrolled to it, and waiting on it before
+	   scrolling just stalls until the timeout.
+
+	   So this scrolls immediately and keeps re-scrolling for a short window instead: the
+	   first jump is instant feedback, and each one drags the render (and the growth it
+	   brings) along until the document stops moving. */
+	scrollToBottomAfterSend(file: TFile) {
 
 		const view = this.app.workspace.getLeavesOfType("markdown")
 			.map(leaf => leaf.view)
 			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 		if (!view) return;
 
-		const context = await this.getArchiveContext(file);
-		const entry = context.messageMap.get(messageId);
-		if (entry) await this.waitForRenderedElement(entry);
+		const start = performance.now();
 
-		/* The element existing still isn't its final height - the processor renders the
-		   message body into it afterwards, asynchronously. Scrolling across the next two
-		   frames catches the settled layout; the second jump on an already bottomed-out
-		   document is a no-op. */
-		requestAnimationFrame(() => {
+		const pin = () => {
 			scrollDocument(view, "bottom");
-			requestAnimationFrame(() => scrollDocument(view, "bottom"));
-		});
+			// short enough that it can't fight the user for long if they scroll away
+			// mid-window, long enough to outlast the render of an ordinary message
+			if (performance.now() - start < SCROLL_ON_SEND_PIN_MS) {
+				requestAnimationFrame(pin);
+			}
+		};
+
+		pin();
 	}
 
 	async showPinnedMessagesOnly(){
