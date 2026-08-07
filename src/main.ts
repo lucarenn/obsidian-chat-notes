@@ -773,6 +773,12 @@ export default class ChatNotesPlugin extends Plugin {
 			container.classList.add("menu-btn-no-shadow");
 		}
 
+		// hidden by a class on the container rather than by skipping the buttons when the
+		// header is built: this path reruns on every settings/YAML change, so both toggles
+		// take effect on the messages already on screen instead of needing a rerender
+		container.classList.toggle("msg-header-no-author", config.showMessageAuthor === false);
+		container.classList.toggle("msg-header-no-timestamp", config.showMessageTimestamp === false);
+
 		if (config.messageFlashColor){
 			container.style.setProperty(
 				"--settings-msg-flash-color",

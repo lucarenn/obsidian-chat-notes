@@ -15,6 +15,8 @@ export interface ChatConfig {
 	defaultAuthorMode?: DefaultAuthorMode;
 	messageBgColor?: string;
 	enableButtonShadow?: boolean;
+	showMessageAuthor?: boolean;
+	showMessageTimestamp?: boolean;
     messageCornerRadius?: number;
 	chatId?: string;
 	author?: string;
@@ -29,6 +31,8 @@ export interface ChatConfig {
 export interface ChatNotesPluginSettings extends ChatConfig {
 	messageBgColor: string;
 	enableButtonShadow: boolean;
+	showMessageAuthor: boolean;
+	showMessageTimestamp: boolean;
     messageCornerRadius: number;
 	messageHighlightColor: string;
 	messageFlashColor: string;
@@ -42,6 +46,8 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageBgColor: "#6d54b1",
 	enableButtonShadow: true,
+	showMessageAuthor: true,
+	showMessageTimestamp: true,
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
 	messageFlashColor: "white",
@@ -138,6 +144,30 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Show message author")
+		.setDesc("Show the author name in the header of every message. Override per file with 'msgShowAuthor: true' or 'msgShowAuthor: false'.")
+		.addToggle(toggle => {
+			toggle
+				.setValue(this.plugin.settings.showMessageAuthor)
+				.onChange(async (value) => {
+					this.plugin.settings.showMessageAuthor = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
+		.setName("Show message time")
+		.setDesc("Show the timestamp in the header of every message. Override per file with 'msgShowTime: true' or 'msgShowTime: false'.")
+		.addToggle(toggle => {
+			toggle
+				.setValue(this.plugin.settings.showMessageTimestamp)
+				.onChange(async (value) => {
+					this.plugin.settings.showMessageTimestamp = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Message corner radius")
 		.setDesc("Determines how round corners of the message bubbles are")
 		.addSlider(slider => {
@@ -181,10 +211,21 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 }
 
 
+/* Same idea as the mode check below: only a value that actually reads as a boolean counts
+   as an override. A real YAML boolean arrives as one, a quoted "true"/"false" as a string,
+   and anything else (a typo, an empty key) resolves to undefined so resolveConfig drops it
+   and the global setting stands - rather than a stray word silently meaning "false". */
+function parseBooleanOverride(value: unknown): boolean | undefined {
+	if (typeof value === "boolean") return value;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	return undefined;
+}
+
 export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = cache?.frontmatter;
-  
+
 	if (!fm) return {};
 
 	// YAML holds whatever the user typed, so only a recognised mode counts as an
@@ -204,7 +245,9 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		messageHighlightColor: fm.msgPinColor,
 		messageFlashColor: fm. msgFlashColor,
 		messageReplyColor: fm.msgReplyColor,
-		messageBorderColor: fm.msgBorderColor
+		messageBorderColor: fm.msgBorderColor,
+		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
+		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime)
 	};
 }
 

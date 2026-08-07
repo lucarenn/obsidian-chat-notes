@@ -213,6 +213,17 @@
     margin-left: 11px;
 }
 
+/* Author/timestamp visibility, driven per file by the resolved config (see applyStyles).
+   The buttons are always built; hiding them here keeps both toggles live on messages that
+   are already rendered.
+   With both off, .msg-header-meta stays in place as an empty, zero-width flex item - it
+   is its margin-left:auto that pushes the action menu to the right edge, so hiding it
+   would drag the menu back to the left. */
+.msg-header-no-author .msg-author,
+.msg-header-no-timestamp .msg-timestamp {
+    display: none;
+}
+
 .msg-action-btn-container {
     display: none;
     gap: 6px;
