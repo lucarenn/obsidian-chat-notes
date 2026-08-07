@@ -214,7 +214,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		if (!value) return;
 
 		// empty string -> undefined, so appendMessage falls back to the configured default
-		await plugin.appendMessage(file, value, {
+		const messageId = await plugin.appendMessage(file, value, {
 			author: authorInput.value.trim() || undefined,
 			timestamp: timeInput.value.trim() || undefined
 		});
@@ -229,6 +229,14 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 
 		// a pending reply only applies to the message it was just sent with
 		void plugin.handleCancelReply();
+
+		// not awaited: the scroll waits on the render of a message already written to disk,
+		// so nothing here depends on it and the input stays responsive meanwhile
+		if (plugin.getConfigCache(file).scrollOnSend) {
+			void plugin.scrollToBottomAfterSend(file, messageId).catch(err => {
+				console.error("Failed to scroll after sending", err);
+			});
+		}
 	};
 
 	/* Keyboard route into the header overrides, mirroring what hovering the area does with

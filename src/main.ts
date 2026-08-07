@@ -1,11 +1,15 @@
-import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile } from "obsidian";
+import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
 import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor, formatTimestamp } from "./util"
 
+/* Base name for notes made by the "Create new chat note" command; a numeric suffix is
+   appended if the folder already holds one. */
+const NEW_CHAT_NOTE_NAME = "Untitled chat";
+
 export default class ChatNotesPlugin extends Plugin {
-	
+
 	openMenu: HTMLElement | null = null;
 	settings: ChatNotesPluginSettings;
 	chatInputEl: HTMLElement;
@@ -14,6 +18,7 @@ export default class ChatNotesPlugin extends Plugin {
 	chatReplyTextEl: HTMLElement;
 	resizeObserver: ResizeObserver | null = null;
 	currentFile: TFile | null = null;
+	ribbonIconEl: HTMLElement | null = null;
 
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
@@ -57,6 +62,19 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// load global settings
 		await this.loadSettings();
+
+		this.addCommand({
+			id: "create-chat-note",
+			name: "Create new chat note",
+			callback: () => {
+				void this.createChatNote().catch(err => {
+					console.error("Failed to create chat note", err);
+					new Notice("Could not create the chat note");
+				});
+			},
+		});
+
+		this.updateRibbonIcon();
 
 		this.addCommand({
 			id: "focus-chat-input",
@@ -425,6 +443,85 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
+	/* Chat Note Creation */
+
+	/* Mirrors the ribbon icon to the setting. addRibbonIcon has no counterpart to remove
+	   one, so the element is kept and detached by hand - and only ever created once, since
+	   a second call would leave a duplicate icon behind. */
+	updateRibbonIcon() {
+		const wanted = this.settings.showRibbonIcon;
+
+		if (wanted && !this.ribbonIconEl) {
+			this.ribbonIconEl = this.addRibbonIcon(
+				"message-square-plus",
+				"Create new chat note",
+				() => {
+					void this.createChatNote().catch(err => {
+						console.error("Failed to create chat note", err);
+						new Notice("Could not create the chat note");
+					});
+				}
+			);
+		} else if (!wanted && this.ribbonIconEl) {
+			this.ribbonIconEl.remove();
+			this.ribbonIconEl = null;
+		}
+	}
+
+	/* The frontmatter a new chat note starts with. Only the keys nothing else can supply
+	   are written live: `type` is what marks the file as a chat at all (see isChatFile),
+	   and `author` - the chat owner - has no global setting to fall back on. The rest are
+	   commented out on purpose. A key that is actually present overrides the global setting
+	   permanently for that file, so writing them all out would freeze the note's appearance
+	   at creation time and silently ignore every later change to the global settings.
+	   Values shown are the current globals, so uncommenting one changes nothing until it is
+	   edited. */
+	buildChatNoteFrontmatter(): string {
+		const s = this.settings;
+
+		return [
+			"---",
+			"type: chat",
+			"author: ",
+			"# --- optional per-file overrides, uncomment to use ---",
+			`# msgShowAuthor: ${s.showMessageAuthor}`,
+			`# msgShowTime: ${s.showMessageTimestamp}`,
+			`# msgDefaultAuthor: ${s.defaultAuthorMode}`,
+			`# msgScrollOnSend: ${s.scrollOnSend}`,
+			// quoted, or YAML reads the leading "#" of a hex color as a comment
+			`# msgColor: "${s.messageBgColor}"`,
+			`# msgPinColor: "${s.messageHighlightColor}"`,
+			`# msgFlashColor: "${s.messageFlashColor}"`,
+			`# msgReplyColor: "${s.messageReplyColor}"`,
+			`# msgBorderColor: "${s.messageBorderColor}"`,
+			"---",
+			""
+		].join("\n");
+	}
+
+	/* Creates a blank chat note and opens it. The input field and rendering follow on their
+	   own: the note only becomes a chat once metadataCache has parsed the new frontmatter,
+	   which fires onYAMLChange and takes the "chat status changed" path from there. */
+	async createChatNote(): Promise<TFile> {
+
+		// resolves against the user's own "Default location for new notes" preference
+		// rather than hardcoding the vault root
+		const parent = this.app.fileManager.getNewFileParent(
+			this.app.workspace.getActiveFile()?.path ?? ""
+		);
+		const folder = parent.path === "/" ? "" : `${parent.path}/`;
+
+		let path = normalizePath(`${folder}${NEW_CHAT_NOTE_NAME}.md`);
+		for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) {
+			path = normalizePath(`${folder}${NEW_CHAT_NOTE_NAME} ${n}.md`);
+		}
+
+		const file = await this.app.vault.create(path, this.buildChatNoteFrontmatter());
+		await this.app.workspace.getLeaf(false).openFile(file);
+
+		return file;
+	}
+
 	/* Message Actions */
 
 	handleMenuToggle(menu: HTMLElement) {
@@ -560,11 +657,12 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Builds a full message (header + content) and appends it to the file. `overrides`
 	   carries whatever the user typed into the input's header row; anything left empty
-	   there falls back to the configured default. */
+	   there falls back to the configured default. Returns the new message's id, which
+	   callers need to follow it once the codeblock processor has rendered it. */
 	async appendMessage(file: TFile, content: string, overrides?: {
 		author?: string;
 		timestamp?: string;
-	}) {
+	}): Promise<string> {
 		const context = await this.getArchiveContext(file);
 		const note = this.getChatNote(file);
 
@@ -602,6 +700,35 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 
 		await this.app.vault.modify(file, prefix + raw);
+
+		return header.id;
+	}
+
+	/* Jump to the end of the chat after a message was sent (the "Scroll to bottom on send"
+	   setting). Firing the plain scroll right away would race the render: vault.modify only
+	   schedules the codeblock processor, so the document is still its old height at that
+	   point - and in Live Preview CodeMirror has not mounted the new block at all yet.
+	   Waiting for the new message's own element to appear first anchors the jump to a
+	   document that actually contains it. */
+	async scrollToBottomAfterSend(file: TFile, messageId: string) {
+
+		const view = this.app.workspace.getLeavesOfType("markdown")
+			.map(leaf => leaf.view)
+			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
+		if (!view) return;
+
+		const context = await this.getArchiveContext(file);
+		const entry = context.messageMap.get(messageId);
+		if (entry) await this.waitForRenderedElement(entry);
+
+		/* The element existing still isn't its final height - the processor renders the
+		   message body into it afterwards, asynchronously. Scrolling across the next two
+		   frames catches the settled layout; the second jump on an already bottomed-out
+		   document is a no-op. */
+		requestAnimationFrame(() => {
+			scrollDocument(view, "bottom");
+			requestAnimationFrame(() => scrollDocument(view, "bottom"));
+		});
 	}
 
 	async showPinnedMessagesOnly(){
@@ -722,6 +849,7 @@ export default class ChatNotesPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 
+		this.updateRibbonIcon();
 		this.updateAllFileConfigs();
 		this.refreshOpenFiles();
 	}

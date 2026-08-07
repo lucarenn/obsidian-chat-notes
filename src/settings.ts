@@ -17,6 +17,7 @@ export interface ChatConfig {
 	enableButtonShadow?: boolean;
 	showMessageAuthor?: boolean;
 	showMessageTimestamp?: boolean;
+	scrollOnSend?: boolean;
     messageCornerRadius?: number;
 	chatId?: string;
 	author?: string;
@@ -33,6 +34,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	enableButtonShadow: boolean;
 	showMessageAuthor: boolean;
 	showMessageTimestamp: boolean;
+	scrollOnSend: boolean;
     messageCornerRadius: number;
 	messageHighlightColor: string;
 	messageFlashColor: string;
@@ -40,6 +42,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	messageBorderColor: string;
 	inputMaxHeight: number;
 	defaultAuthorMode: DefaultAuthorMode;
+	showRibbonIcon: boolean;
 	// specify the variables that should appear in global settings
 }
 
@@ -48,6 +51,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	enableButtonShadow: true,
 	showMessageAuthor: true,
 	showMessageTimestamp: true,
+	scrollOnSend: false,
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
 	messageFlashColor: "white",
@@ -55,6 +59,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageBorderColor: "#808080",
 	inputMaxHeight: 200,
 	defaultAuthorMode: "owner",
+	showRibbonIcon: true,
 	// add default values here
 };
 
@@ -195,6 +200,30 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Scroll to bottom on send")
+		.setDesc("Jump to the end of the chat every time a message is sent. Override per file with 'msgScrollOnSend: true' or 'msgScrollOnSend: false'.")
+		.addToggle(toggle => {
+			toggle
+				.setValue(this.plugin.settings.scrollOnSend)
+				.onChange(async (value) => {
+					this.plugin.settings.scrollOnSend = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
+		.setName("Show ribbon icon")
+		.setDesc("Show a 'Create new chat note' button in the left ribbon. The command itself stays available from the command palette either way, and can be given a hotkey there.")
+		.addToggle(toggle => {
+			toggle
+				.setValue(this.plugin.settings.showRibbonIcon)
+				.onChange(async (value) => {
+					this.plugin.settings.showRibbonIcon = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Max input field height")
 		.setDesc("Determines how tall the message input field can grow before it starts scrolling")
 		.addSlider(slider => {
@@ -247,7 +276,8 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		messageReplyColor: fm.msgReplyColor,
 		messageBorderColor: fm.msgBorderColor,
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
-		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime)
+		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
+		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend)
 	};
 }
 
