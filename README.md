@@ -90,6 +90,7 @@ A few things to know:
 | `msgShowAuthor` | `true` / `false` | Show message author |
 | `msgShowTime` | `true` / `false` | Show message time |
 | `msgAuthorBadges` | `true` / `false` | Show author badges |
+| `msgButtonShadow` | `true` / `false` | Enable button shadow |
 | `msgScrollOnSend` | `true` / `false` | Scroll to bottom on send |
 | `msgDefaultAuthor` | `owner` / `previous` | Default message author |
 | `chatId` | text | *(reserved - read but not currently used)* |
@@ -100,7 +101,6 @@ Out-of-range numbers are clamped rather than ignored: `msgCornerRadius: 999` giv
 
 These have no per-note override and always apply everywhere:
 
-- Enable button shadow
 - Show ribbon icon
 - Input field width offset
 - Max input field height

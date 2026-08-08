@@ -478,6 +478,7 @@ export default class ChatNotesPlugin extends Plugin {
 			`# msgShowTime: ${s.showMessageTimestamp}`,
 			`# msgDefaultAuthor: ${s.defaultAuthorMode}`,
 			`# msgScrollOnSend: ${s.scrollOnSend}`,
+			`# msgButtonShadow: ${s.enableButtonShadow}`,
 			// quoted, or YAML reads the leading "#" of a hex color as a comment
 			`# msgColor: "${s.messageBgColor}"`,
 			`# msgPinColor: "${s.messageHighlightColor}"`,

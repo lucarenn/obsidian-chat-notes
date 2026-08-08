@@ -147,7 +147,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Enable button shadow")
-		.setDesc("Toggle shadow on message action buttons")
+		.setDesc("Toggle shadow on message action buttons. Override per file with 'msgButtonShadow: true' or 'msgButtonShadow: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.enableButtonShadow)
@@ -321,7 +321,8 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
 		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
 		showAuthorBadges: parseBooleanOverride(fm.msgAuthorBadges),
-		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend)
+		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend),
+		enableButtonShadow: parseBooleanOverride(fm.msgButtonShadow)
 	};
 }
 
