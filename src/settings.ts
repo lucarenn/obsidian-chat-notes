@@ -41,10 +41,16 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	messageReplyColor: string;
 	messageBorderColor: string;
 	inputMaxHeight: number;
+	inputWidthOffset: number;
 	defaultAuthorMode: DefaultAuthorMode;
 	showRibbonIcon: boolean;
 	// specify the variables that should appear in global settings
 }
+
+/* Shared by the settings slider and the YAML override parser so the two can't drift apart
+   on what counts as a usable radius. */
+export const CORNER_RADIUS_MIN = 0;
+export const CORNER_RADIUS_MAX = 50;
 
 export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageBgColor: "#6d54b1",
@@ -58,6 +64,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageReplyColor: "#57467e",
 	messageBorderColor: "#808080",
 	inputMaxHeight: 200,
+	inputWidthOffset: 0,
 	defaultAuthorMode: "owner",
 	showRibbonIcon: true,
 	// add default values here
@@ -174,10 +181,10 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Message corner radius")
-		.setDesc("Determines how round corners of the message bubbles are")
+		.setDesc("Determines how round corners of the message bubbles are. Override per file with 'msgCornerRadius: 20'.")
 		.addSlider(slider => {
 			slider
-				.setLimits(0, 50, 1) 	// min 0px, max 50px, step 1px
+				.setLimits(CORNER_RADIUS_MIN, CORNER_RADIUS_MAX, 1) 	// step 1px
 				.setValue(this.plugin.settings.messageCornerRadius)
 				.onChange(async (value) => {
 					this.plugin.settings.messageCornerRadius = value;
@@ -224,6 +231,20 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Input field width offset")
+		.setDesc("Widens or narrows the message input field relative to the message bubbles it sits under. At 0 its edges line up with theirs.")
+		.addSlider(slider => {
+			slider
+				.setLimits(-150, 150, 5) 	// min -150px, max +150px, step 5px
+				.setValue(this.plugin.settings.inputWidthOffset)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.inputWidthOffset = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Max input field height")
 		.setDesc("Determines how tall the message input field can grow before it starts scrolling")
 		.addSlider(slider => {
@@ -251,6 +272,21 @@ function parseBooleanOverride(value: unknown): boolean | undefined {
 	return undefined;
 }
 
+/* Same idea for numbers: a real YAML number arrives as one, a quoted "20" as a string.
+   Anything that isn't a finite number (a typo, an empty key) resolves to undefined so the
+   global setting stands, rather than a stray value becoming a 0px or NaN radius. In-range
+   but out-of-bounds values are clamped instead of dropped - the intent ("as round as
+   possible") is clear enough to honour, it just can't go past what the slider allows. */
+function parsePixelOverride(value: unknown, min: number, max: number): number | undefined {
+	// Number("") is 0, so an empty string has to be rejected before the conversion
+	const parsed =
+		typeof value === "string"
+			? (value.trim() === "" ? undefined : Number(value.trim()))
+			: value;
+	if (typeof parsed !== "number" || !Number.isFinite(parsed)) return undefined;
+	return Math.min(Math.max(parsed, min), max);
+}
+
 export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = cache?.frontmatter;
@@ -275,6 +311,7 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		messageFlashColor: fm. msgFlashColor,
 		messageReplyColor: fm.msgReplyColor,
 		messageBorderColor: fm.msgBorderColor,
+		messageCornerRadius: parsePixelOverride(fm.msgCornerRadius, CORNER_RADIUS_MIN, CORNER_RADIUS_MAX),
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
 		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
 		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend)

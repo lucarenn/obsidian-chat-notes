@@ -7,21 +7,72 @@ export function isChatFile(app: App, file: TFile): boolean {
 	return cache?.frontmatter?.type === "chat";
 }
 
-/* Picks black or white text for readable contrast against an arbitrary user-chosen hex
+/* Kept between calls - a fresh canvas per color would allocate a backing store each time,
+   and all this needs is the 2d context's color parser. */
+let colorProbe: CanvasRenderingContext2D | null | undefined;
+
+function getColorProbe(): CanvasRenderingContext2D | null {
+	if (colorProbe === undefined) {
+		colorProbe = document.createElement("canvas").getContext("2d");
+	}
+	return colorProbe;
+}
+
+/* Red/green/blue channels of any color CSS itself accepts - "white", "#abc",
+   "rgb(0 128 255)", "hsl(280 40% 45%)" - not just hex. The settings color picker only ever
+   emits hex, but a YAML override is whatever the user typed, and hand-parsing hex meant
+   every other valid CSS color read as unparseable.
+
+   Rather than grow a named-color table, the value goes to the canvas color parser, which
+   normalises whatever it accepts to "#rrggbb" (or "rgba(r, g, b, a)" when translucent).
+   Any alpha is ignored: what shows through a translucent bubble is the note background,
+   which isn't knowable from here. */
+function parseColorChannels(color: string): [number, number, number] | undefined {
+	const probe = getColorProbe();
+	if (!probe) return undefined;
+
+	/* A value the parser rejects leaves fillStyle at whatever it was, so it gets assigned
+	   twice over two different sentinels: a color that parsed reads back the same both
+	   times, while a rejected one just echoes the sentinel before it. Comparing against a
+	   single sentinel would misread that exact color as invalid. */
+	probe.fillStyle = "#000000";
+	probe.fillStyle = color;
+	const overBlack = probe.fillStyle;
+
+	probe.fillStyle = "#ffffff";
+	probe.fillStyle = color;
+	const overWhite = probe.fillStyle;
+
+	// fillStyle is also allowed to hold a gradient/pattern, so it reads back as a union -
+	// only the string form can have come from a color assignment
+	if (typeof overWhite !== "string" || overBlack !== overWhite) return undefined;
+
+	if (overWhite.startsWith("#")) {
+		const value = parseInt(overWhite.slice(1), 16);
+		if (Number.isNaN(value)) return undefined;
+		return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+	}
+
+	/* The translucent form - take the channels and drop the trailing alpha. Guarded on the
+	   rgb prefix rather than parsing whatever came back: a wide-gamut input serialises as
+	   "color(srgb 1 0 0)", whose 0-1 components would otherwise be read as 0-255 ones. */
+	if (!overWhite.startsWith("rgb")) return undefined;
+
+	const channels = overWhite.match(/[\d.]+/g);
+	if (!channels || channels.length < 3) return undefined;
+
+	return [Number(channels[0]), Number(channels[1]), Number(channels[2])];
+}
+
+/* Picks black or white text for readable contrast against an arbitrary user-chosen
    background color, using the standard perceived-brightness formula (weights green
-   highest, blue lowest, matching human luminance sensitivity). */
-export function getReadableTextColor(hex: string): string {
-	const clean = hex.replace("#", "");
-	const full = clean.length === 3
-		? clean.split("").map(c => c + c).join("")
-		: clean;
+   highest, blue lowest, matching human luminance sensitivity). Falls back to light text
+   only for a value CSS itself can't read as a color. */
+export function getReadableTextColor(color: string): string {
+	const channels = parseColorChannels(color);
+	if (!channels) return "#f5f5f5";
 
-	const value = parseInt(full, 16);
-	if (full.length !== 6 || Number.isNaN(value)) return "#f5f5f5";
-
-	const r = (value >> 16) & 255;
-	const g = (value >> 8) & 255;
-	const b = value & 255;
+	const [r, g, b] = channels;
 
 	const brightness = (r * 299 + g * 587 + b * 114) / 1000;
 	return brightness > 150 ? "#1a1a1a" : "#f5f5f5";

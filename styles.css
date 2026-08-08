@@ -196,12 +196,18 @@
     cursor: pointer;
 }
 
+/* Black or white, picked per bubble background in applyStyles (and per message in
+   applyMessageHighlightStyle, since a pinned bubble has its own color) - so the name stays
+   legible on an extreme --settings-msg-bg-color, where the inherited theme text color
+   would be washed out. currentColor as the fallback rather than inherit: on the color
+   property itself it resolves to the same inherited value, without depending on a
+   CSS-wide keyword surviving var() substitution. */
 .msg-author {
     background: transparent !important;
     box-shadow: none !important;
     padding: 0;
     margin: 0;
-    color: inherit;
+    color: var(--settings-msg-text-color, currentColor) !important;
 }
 
 .msg-timestamp {
@@ -256,10 +262,14 @@
     gap: 6px;
 }
 
+/* The buttons are painted in the bubble's own color, so their icons take the same
+   contrast pick as .msg-author - the lucide glyphs stroke in currentColor, so setting
+   color here is all it takes to carry it into the svg. */
 .msg-action-btn {
     border: none;
     background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
     background: var(--background-modifier-hover);
+    color: var(--settings-msg-text-color, currentColor) !important;
     border-radius: 4px;
     padding: 0px 6px;
     cursor: pointer;

@@ -398,12 +398,32 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!inner) return;
 
 		const margin = 16;
+
+		/* Message bubbles sit inset from the content area by the reply gutter on both
+		   sides (see .chat-message), so the input takes that same inset on top of its own
+		   margin - otherwise it spans the full content width and overhangs the visible
+		   edge of every message it lines up under. Read off the DOM rather than repeated
+		   as a literal, so it stays tied to the single --msg-reply-gutter that positions
+		   the bubbles. An unset property parses to NaN, and means the bubbles aren't
+		   inset either - hence falling back to no gutter rather than to a guessed width. */
+		const gutter = parseFloat(
+			getComputedStyle(inner).getPropertyValue("--msg-reply-gutter")
+		) || 0;
+		const inset = gutter + margin;
+
+		/* User taste on top of that alignment: grows (or shrinks) the field around its own
+		   centre, so it stays centred on the same axis as the bubbles instead of drifting
+		   off to one side - hence half the offset coming back off the left edge. */
+		const widthOffset = this.settings.inputWidthOffset;
+
 		const rect = inner.getBoundingClientRect();
 		const parentRect = view.contentEl.getBoundingClientRect();
 		const offsetLeft = rect.left - parentRect.left;
 
-		input.style.width = `${rect.width - margin * 2}px`;
-		input.style.left = `${offsetLeft + margin}px`;
+		// a negative width is an invalid declaration the browser drops entirely, which
+		// would strand the input at whatever width a wider pane last gave it
+		input.style.width = `${Math.max(0, rect.width - inset * 2 + widthOffset)}px`;
+		input.style.left = `${offsetLeft + inset - widthOffset / 2}px`;
 
 	}
 
@@ -885,6 +905,14 @@ export default class ChatNotesPlugin extends Plugin {
 				"--settings-msg-bg-color",
 				config.messageBgColor
 			);
+			// the header's author button and the action-menu icons sit directly on the
+			// bubble, so they follow the same contrast pick as the reply banner instead
+			// of Obsidian's theme text color - which an extreme bubble color can leave
+			// nearly invisible (see .msg-author / .msg-action-btn)
+			container.style.setProperty(
+				"--settings-msg-text-color",
+				getReadableTextColor(config.messageBgColor)
+			);
 		}
 	  
 		container.style.setProperty(
@@ -957,12 +985,20 @@ export default class ChatNotesPlugin extends Plugin {
 		const color = isPinned
 			? config.messageHighlightColor
 			: config.messageBgColor;
-	
+
 		if (!color) return;
 
 		msg.style.setProperty(
 			"--settings-msg-bg-color",
 			color
+		);
+		// pinned messages override the bubble color on the element itself, so the header's
+		// contrast pick has to be re-made against *this* background - the container-level
+		// one applyStyles set is for the normal bubble color and would be the wrong choice
+		// whenever the two colors differ in brightness
+		msg.style.setProperty(
+			"--settings-msg-text-color",
+			getReadableTextColor(color)
 		);
 	}
 
