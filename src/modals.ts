@@ -1,8 +1,7 @@
 import { Modal, App } from "obsidian";
 
 export class ConfirmDeleteModal extends Modal {
-    /* Pop up window to confirm the deletion of a message */
-    
+
     onConfirm: () => void;
 
     constructor(app: App, onConfirm: () => void) {

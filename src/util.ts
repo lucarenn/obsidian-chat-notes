@@ -7,8 +7,7 @@ export function isChatFile(app: App, file: TFile): boolean {
 	return cache?.frontmatter?.type === "chat";
 }
 
-/* Kept between calls - a fresh canvas per color would allocate a backing store each time,
-   and all this needs is the 2d context's color parser. */
+// kept between calls - all this needs is the 2d context's color parser
 let colorProbe: CanvasRenderingContext2D | null | undefined;
 
 function getColorProbe(): CanvasRenderingContext2D | null {
@@ -18,23 +17,15 @@ function getColorProbe(): CanvasRenderingContext2D | null {
 	return colorProbe;
 }
 
-/* Red/green/blue channels of any color CSS itself accepts - "white", "#abc",
-   "rgb(0 128 255)", "hsl(280 40% 45%)" - not just hex. The settings color picker only ever
-   emits hex, but a YAML override is whatever the user typed, and hand-parsing hex meant
-   every other valid CSS color read as unparseable.
-
-   Rather than grow a named-color table, the value goes to the canvas color parser, which
-   normalises whatever it accepts to "#rrggbb" (or "rgba(r, g, b, a)" when translucent).
-   Any alpha is ignored: what shows through a translucent bubble is the note background,
-   which isn't knowable from here. */
+/* RGB channels of any color CSS accepts ("white", "#abc", "rgb(...)", "hsl(...)"), via the
+   canvas color parser - a YAML override is whatever the user typed, not just hex. Alpha is
+   ignored: what shows through a translucent bubble isn't knowable from here. */
 function parseColorChannels(color: string): [number, number, number] | undefined {
 	const probe = getColorProbe();
 	if (!probe) return undefined;
 
-	/* A value the parser rejects leaves fillStyle at whatever it was, so it gets assigned
-	   twice over two different sentinels: a color that parsed reads back the same both
-	   times, while a rejected one just echoes the sentinel before it. Comparing against a
-	   single sentinel would misread that exact color as invalid. */
+	// a rejected value leaves fillStyle untouched, so it is probed over two different
+	// sentinels - one sentinel alone would misread that exact color as invalid
 	probe.fillStyle = "#000000";
 	probe.fillStyle = color;
 	const overBlack = probe.fillStyle;
@@ -43,8 +34,7 @@ function parseColorChannels(color: string): [number, number, number] | undefined
 	probe.fillStyle = color;
 	const overWhite = probe.fillStyle;
 
-	// fillStyle is also allowed to hold a gradient/pattern, so it reads back as a union -
-	// only the string form can have come from a color assignment
+	// fillStyle may also hold a gradient/pattern, so only the string form is a color
 	if (typeof overWhite !== "string" || overBlack !== overWhite) return undefined;
 
 	if (overWhite.startsWith("#")) {
@@ -53,9 +43,8 @@ function parseColorChannels(color: string): [number, number, number] | undefined
 		return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 	}
 
-	/* The translucent form - take the channels and drop the trailing alpha. Guarded on the
-	   rgb prefix rather than parsing whatever came back: a wide-gamut input serialises as
-	   "color(srgb 1 0 0)", whose 0-1 components would otherwise be read as 0-255 ones. */
+	// guarded on the rgb prefix: wide-gamut input serialises as "color(srgb 1 0 0)", whose
+	// 0-1 components would otherwise be read as 0-255 ones
 	if (!overWhite.startsWith("rgb")) return undefined;
 
 	const channels = overWhite.match(/[\d.]+/g);
@@ -64,10 +53,8 @@ function parseColorChannels(color: string): [number, number, number] | undefined
 	return [Number(channels[0]), Number(channels[1]), Number(channels[2])];
 }
 
-/* Picks black or white text for readable contrast against an arbitrary user-chosen
-   background color, using the standard perceived-brightness formula (weights green
-   highest, blue lowest, matching human luminance sensitivity). Falls back to light text
-   only for a value CSS itself can't read as a color. */
+// black or white text for readable contrast on a user-chosen background; falls back to
+// light text for a value CSS itself can't read as a color
 export function getReadableTextColor(color: string): string {
 	const channels = parseColorChannels(color);
 	if (!channels) return "#f5f5f5";
@@ -79,9 +66,8 @@ export function getReadableTextColor(color: string): string {
 }
 
 /* Message ids are compared and incremented as decimal strings, never as numbers: an
-   imported Discord snowflake is 19 digits, well past the 15-16 digits a JS number holds
-   exactly, so `Number(maxId) + 1` there would silently land on an id that already exists
-   (or skip one). These three keep that arithmetic exact at any length. */
+   imported Discord snowflake is 19 digits, past what a JS number holds exactly, so
+   `Number(maxId) + 1` would silently land on an existing id (or skip one). */
 
 export function isNumericId(id: string): boolean {
 	return /^\d+$/.test(id);
@@ -92,8 +78,7 @@ function stripLeadingZeros(value: string): string {
 	return trimmed === "" ? "0" : trimmed;
 }
 
-/* Numeric ordering of two digit-strings: the longer number wins, and equal lengths can
-   be compared lexicographically because digits sort in the same order as their values. */
+// longer number wins; equal lengths compare lexicographically
 export function compareNumericIds(a: string, b: string): number {
 	const left = stripLeadingZeros(a);
 	const right = stripLeadingZeros(b);
@@ -103,7 +88,7 @@ export function compareNumericIds(a: string, b: string): number {
 	return left < right ? -1 : 1;
 }
 
-/* Schoolbook carry, so it stays exact however long the id is. */
+// schoolbook carry, exact at any length
 export function incrementNumericId(value: string): string {
 	const digits = stripLeadingZeros(value).split("");
 
@@ -122,8 +107,7 @@ export function incrementNumericId(value: string): string {
 	return "1" + digits.join("");
 }
 
-/* Accepted shape for a manually entered message time: DD.MM.YYYY with an optional
-   HH:MM, leading zeros optional - so "6.8.2026 14:33" and "06.08.2026" both pass. */
+// DD.MM.YYYY with an optional HH:MM, leading zeros optional
 export const TIMESTAMP_PATTERN = /^\d{1,2}\.\d{1,2}\.\d{4}( \d{1,2}:\d{2})?$/;
 export const TIMESTAMP_PLACEHOLDER = "DD.MM.YYYY HH:MM";
 
@@ -131,8 +115,6 @@ export function isValidTimestamp(value: string): boolean {
 	return TIMESTAMP_PATTERN.test(value.trim());
 }
 
-/* Current local time in the same dotted format the time input accepts - the default
-   timestamp for any message whose header the user didn't edit. */
 export function formatTimestamp(date: Date = new Date()): string {
 	const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -188,7 +170,6 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 		const line = lines[lineNumber];
 		if (!line) continue;
 
-		// Start of chat-message block
 		if (!insideBlock && line.trim() === "````chat-message") {
 			insideBlock = true;
 			currentBlock = [];
@@ -196,7 +177,6 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 			continue;
 		}
 
-		// End of codeblock
 		if (insideBlock && line.trim() === "````") {
 
 			insideBlock = false;
@@ -219,7 +199,7 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 				if(message.header.extra.pinned === "true") {
 					pinnedMessageCounter += 1
 				}
-				
+
 			} catch (e) {
 				console.warn(
 					"Failed to parse chat message",
@@ -230,7 +210,6 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 			continue;
 		}
 
-		// Collect message contents
 		if (insideBlock) {
 			currentBlock.push(line);
 		}
@@ -239,26 +218,23 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 	return [messages, pinnedMessageCounter];
 }
 
+// all html containers of a file - one set per open leaf, reading + live preview
 export function getActiveContainers(app: App, file: TAbstractFile){
-	// get all html containers of the given file (multiple depending on mode and if the file is opened multiple times) 
 
 	const leaves = app.workspace.getLeavesOfType("markdown");
 
 	const containers = []
 	for (const leaf of leaves) {
 		const view = leaf.view;
-	
+
 		if (!(view instanceof MarkdownView)) continue;
 		if (view.file?.path !== file.path) continue;
 
-		// get containers for reading and preview mode
 		const fileContainers = [
 			view.previewMode?.containerEl,
 			view.contentEl,
-			// view.editor?.cm?.dom // raw CodeMirror editor DOM, needed?
 		];
 
-		// only return available containers
 		const availableFileContaiers = []
 		for (const container of fileContainers){
 			if (container instanceof HTMLElement) {

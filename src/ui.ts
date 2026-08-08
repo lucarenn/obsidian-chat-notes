@@ -2,14 +2,14 @@ import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, se
 import { ConfirmDeleteModal } from "./modals"
 import { Message, MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
 import { scrollDocument, isValidTimestamp, TIMESTAMP_PLACEHOLDER } from "./util"
+import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky"
 import type ChatNotesPlugin from "./main";
 
 
 export function createChatInput(plugin: ChatNotesPlugin) {
 	const container = createDiv("chat-input-container");
 
-	/* Banner shown above the input row while a reply is pending; hidden (and removed
-	   from layout) whenever there is no active reply target. */
+	// shown above the input row while a reply is pending
 	const replyBanner = container.createDiv("chat-input-reply-banner");
 
 	const replyIcon = replyBanner.createSpan("chat-input-reply-banner-icon");
@@ -28,9 +28,8 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		void plugin.handleCancelReply();
 	});
 
-	/* Collapsible header row, letting the user override the author/timestamp the next
-	   sent message is written with. Collapsed to just a slim "···" affordance so it stays
-	   out of the way while typing; see the reveal wiring below for when it opens. */
+	// collapsible header row: overrides the author/timestamp of the next sent message.
+	// Collapsed to a slim "···" affordance; see the reveal wiring below for when it opens.
 	const headerArea = container.createDiv("chat-input-header-area");
 
 	const expander = headerArea.createEl("button", {
@@ -43,9 +42,8 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 
 	const extraRow = headerArea.createDiv("chat-input-extra-row");
 
-	/* Native <input list=...> combobox: accepts a brand new name as free text while
-	   offering the file's existing authors as a dropdown, rather than forcing a choice
-	   between the two. */
+	// native <input list=...> combobox: accepts a new name as free text while offering the
+	// file's existing authors as a dropdown
 	const authorField = extraRow.createDiv("chat-input-extra-field");
 	authorField.createEl("label", {
 		cls: "chat-input-extra-label",
@@ -73,16 +71,12 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 	timeInput.type = "text";
 	timeInput.placeholder = TIMESTAMP_PLACEHOLDER;
 
-	/* Holds the row open past the hover in the two cases where collapsing it would fight
-	   the user: while something inside has focus (the author dropdown would otherwise
-	   vanish the moment the mouse left the row) and while either field holds a value, so
-	   a pending override is never hidden from the person who typed it. */
+	// holds the row open past the hover while a field has focus or holds a value
 	const updateHeaderAreaState = () => {
 		const hasValue =
 			authorInput.value.trim() !== "" || timeInput.value.trim() !== "";
-		// the fields only, not the whole area: clicking the "···" button focuses it, and
-		// counting that as focus would make the button read its own click as a sticky
-		// open state and answer it with a dismissal every time (see expander.onclick)
+		// the fields only, not the whole area: clicking "···" focuses it, and counting that
+		// as focus would make the button dismiss its own click (see expander.onclick)
 		const hasFocus = extraRow.contains(document.activeElement);
 
 		headerArea.classList.toggle("is-active", hasValue || hasFocus);
@@ -93,27 +87,23 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		expander.setAttribute("aria-expanded", String(pinned));
 	};
 
-	/* Dismissal: the counterpart to .is-active, letting the user close a row that a typed
-	   override would otherwise hold open forever - without clearing what was typed, which
-	   stays live and still applies to the next message sent. Hover keeps working as a peek
-	   at the pending values while dismissed. */
+	// counterpart to .is-active: closes a row a typed override would otherwise hold open
+	// forever, without clearing what was typed
 	const setHeaderAreaCollapsed = (collapsed: boolean) => {
 		headerArea.classList.toggle("is-collapsed", collapsed);
 		if (!collapsed) headerArea.classList.remove("is-dismissing");
 	};
 
-	/* Dismissing by click happens with the pointer necessarily inside the area, where the
-	   hover peek would otherwise keep the row open and make the button look inert. This
-	   suspends the peek for exactly that stretch, so the row shuts under the mouse. */
+	// dismissing by click happens with the pointer inside the area, where the hover peek
+	// would keep the row open - .is-dismissing suspends the peek until the pointer leaves
 	headerArea.addEventListener("pointerleave", () =>
 		headerArea.classList.remove("is-dismissing"));
 
 	expander.onclick = (e) => {
 		e.stopPropagation();
 
-		/* Clicking while the row is held open by anything other than the hover itself reads
-		   as "close this", since the hover already shows it - so the button only ever pins
-		   when there is nothing to dismiss. */
+		// clicking while the row is held open by anything but hover reads as "close this",
+		// so the button only ever pins when there is nothing to dismiss
 		const stickyOpen =
 			headerArea.classList.contains("is-pinned") ||
 			headerArea.classList.contains("is-active");
@@ -149,10 +139,8 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		updateHeaderAreaState();
 	});
 
-	/* Suggestions and the placeholder (which advertises the author that sending right now
-	   would use) are pulled fresh each time the row opens: both shift as messages are
-	   added, files switched, or YAML overrides edited, and this is the only moment either
-	   is actually on screen. */
+	// suggestions and placeholder are pulled fresh each time the row opens: both shift as
+	// messages are added, files switched or YAML edited
 	const refreshHeaderFields = async () => {
 		const file = plugin.app.workspace.getActiveFile();
 		if (!file || !plugin.getIsChatNote(file)) return;
@@ -179,8 +167,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		updateHeaderAreaState();
 	};
 
-	/* Row holding the textarea and send button, kept separate from the container so the
-	   reply banner can sit above it without disturbing their existing flex layout. */
+	// textarea + send button, kept in their own row so the reply banner can sit above them
 	const inputRow = container.createDiv("chat-input-row");
 
 	const textarea = inputRow.createEl("textarea", {
@@ -202,8 +189,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		resizeInput();
 	};
 
-	// set the baseline height immediately, so the field isn't collapsed
-	// for an instant when first created (before any input is entered)
+	// set the baseline height immediately, so the field isn't collapsed for an instant
 	resizeInput();
 
 	const sendMessage = async () => {
@@ -223,8 +209,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		plugin.getChatNote(file).inputCache = "";
 		resizeInput();
 
-		// header overrides apply to the message they were typed for and nothing after it;
-		// the next message re-derives both from the configured defaults
+		// header overrides apply to the message they were typed for and nothing after it
 		resetHeaderFields();
 
 		// a pending reply only applies to the message it was just sent with
@@ -235,11 +220,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		}
 	};
 
-	/* Keyboard route into the header overrides, mirroring what hovering the area does with
-	   the mouse: Mod+Up from the textarea opens the row and puts the caret in Author,
-	   Mod+Up (or Escape) from either field closes it and hands focus back to the textarea.
-	   It pins rather than merely focusing, so the row stays open if the user then clicks
-	   away - the same end state the "···" button produces. */
+	// keyboard route into the header overrides: Mod+Up opens the row and focuses Author,
+	// Mod+Up / Escape from a field closes it. Pins rather than merely focusing, so the row
+	// stays open if the user then clicks away.
 	const openHeaderArea = () => {
 		setHeaderAreaPinned(true);
 		// focusing the author field also refreshes the suggestions/placeholder (see above)
@@ -255,12 +238,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		textarea.focus();
 	};
 
-	// Obsidian's global hotkey scope can swallow "Mod+Enter" before it ever
-	// reaches a plain keydown listener (e.g. if some other command already
-	// claims that combo). Registering our own scope and pushing it while
-	// the input is focused makes our binding take priority instead.
-	// Mod+Up needs this doubly: it is bound globally to "Scroll to Top", which it
-	// keeps doing everywhere except while one of these fields holds focus.
+	// Obsidian's global hotkey scope can swallow these before a plain keydown listener sees
+	// them; pushing our own scope while the input is focused makes our binding win.
+	// Mod+Up needs this doubly: it is bound globally to "Scroll to Top".
 	const sendScope = new Scope(plugin.app.scope);
 	sendScope.register(["Mod"], "Enter", () => {
 		void sendMessage();
@@ -309,8 +289,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 
 
 export function addScrollButtons(view: MarkdownView) {
-	
-	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+
 	if (!view) return;
 
 	// Avoid adding multiple times
@@ -328,8 +307,7 @@ export function addScrollButtons(view: MarkdownView) {
 
 
 export function addPinButton(view: MarkdownView, onPress: ()=>void) {
-	
-	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+
 	if (!view) return;
 
 	// Avoid adding multiple times
@@ -346,8 +324,7 @@ export function addScrollMsgButton(view: MarkdownView,
 	file: TFile,
 	msgId: string,
 	onScroll: (file: TFile, id:  string)=>void) {
-	
-	// const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+
 	if (!view) return;
 	if ((view as any)._msgScrollButtonAdded) return;
 	(view as any)._msgScrollButtonAdded = true;
@@ -363,11 +340,9 @@ Create HTML elements for messages
 */
 export function createElementsHTML({plugin, ctx, msg, author_text, context, isReplyTarget, onToggle, onHighlight, onReplyToggle, onScrollToReply} : CreateHTMLParams){
 
-	// row reserves a fixed gutter (via wrapper's margin-right, see styles.css) so the
-	// reply button always has room inside the row's own box - it never needs to escape
-	// into space outside the message column, which isn't reliably clipping-free across
-	// reading view / live preview / window widths. Hover is bound to the row (not just
-	// the bubble) so the whole bubble+gutter+button strip is one continuous hover zone.
+	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
+	// button always has room inside the row's own box and can't be clipped by an ancestor's
+	// overflow. Hover is bound to the row, making bubble+gutter+button one hover zone.
 	const row = document.createElement("div");
 	row.className = "chat-message-row";
 
@@ -404,9 +379,8 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, isRe
 
 	wrapper.append(header, content);
 
-	/* Hover button, spans the full message height in the reserved gutter (see styles.css).
-	   The icon's own position is kept on screen while scrolling via attachStickyReplyIcon
-	   below, instead of disappearing along with the message top. */
+	// hover button, spanning the full message height in the reserved gutter; its icon is
+	// kept on screen while scrolling by attachStickyReplyIcon below
 	const replyBtn = document.createElement("button");
 	replyBtn.className = "msg-reply-btn";
 	replyBtn.type = "button";
@@ -423,7 +397,17 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, isRe
 
 	attachStickyReplyIcon(row, replyBtn, replyBtnIcon, ctx);
 
-	row.append(wrapper, replyBtn);
+	// author badge + speech-bubble tail in the gutter. Always built and revealed by the
+	// container's msg-show-author-badges class (see applyStyles) rather than built
+	// conditionally, so the setting applies without a rerender.
+	row.classList.toggle("is-owner", context.isOwnerMessage(msg));
+
+	const { badge, tail } = createAuthorBadge(author_text);
+
+	// after the bubble in DOM order, so the tail paints over the bubble's border ring
+	row.append(wrapper, replyBtn, badge);
+
+	registerSticky(row, badge, ctx, () => tailInsets(row, badge, tail));
 
 	return {
 		wrapper,
@@ -432,13 +416,88 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, isRe
 	}
 }
 
-/* Manually reproduces `position: sticky` for the reply icon via scroll tracking. CSS
-   sticky alone works in Reading View but goes inert in Live Preview, where Obsidian
-   mounts each message as a CodeMirror block widget nested inside flex containers
-   (.cm-sizer/.cm-scroller) rather than Reading View's flat DOM - tracking the scroll
-   position by hand sidesteps that ancestor chain entirely, so the icon behaves
-   identically in both view modes. Only active while the row is actually hovered
-   (i.e. while the button is visible), so idle messages carry no listener overhead. */
+// tail size in the SVG's own user units. Drawn once apex-up-and-left and mirrored in CSS
+// for owner messages, so one shape serves both sides.
+const TAIL_SIZE = 12;
+
+// how far the tail is pushed into the bubble to hide its border ring at the join.
+// Must match --msg-tail-overlap in styles.css, which does the pushing.
+const TAIL_OVERLAP = 2;
+
+function createTailSvg(): SVGSVGElement {
+	const NS = "http://www.w3.org/2000/svg";
+
+	const svg = document.createElementNS(NS, "svg");
+	svg.setAttribute("viewBox", `0 0 ${TAIL_SIZE} ${TAIL_SIZE}`);
+	svg.setAttribute("width", `${TAIL_SIZE}`);
+	svg.setAttribute("height", `${TAIL_SIZE}`);
+
+	/* Two paths over one triangle. The closed one fills it in the bubble's colour right
+	   across the overlap, covering the bubble's border ring at the join. The open one
+	   strokes only the two outer edges and stops short by the overlap - the third edge is
+	   the seam and must stay unstroked, and a full-width outline would leave two stubs of
+	   border poking into the bubble's interior. */
+	const edge = TAIL_SIZE - TAIL_OVERLAP;
+
+	const fill = document.createElementNS(NS, "path");
+	fill.setAttribute("d", `M ${TAIL_SIZE} 0 L 0 0 L ${TAIL_SIZE} ${TAIL_SIZE} Z`);
+	fill.setAttribute("class", "msg-author-badge-tail-fill");
+
+	const stroke = document.createElementNS(NS, "path");
+	stroke.setAttribute("d", `M ${edge} 0 L 0 0 L ${edge} ${edge}`);
+	stroke.setAttribute("class", "msg-author-badge-tail-stroke");
+
+	svg.append(fill, stroke);
+	return svg;
+}
+
+function createAuthorBadge(authorText: string): { badge: HTMLDivElement; tail: HTMLSpanElement } {
+
+	const badge = document.createElement("div");
+	badge.className = "msg-author-badge";
+
+	// purely decorative - the name is already a copyable button in the header, and anything
+	// hit-testable here would dead-zone the reply button on owner messages
+	badge.setAttribute("aria-hidden", "true");
+
+	const avatar = document.createElement("span");
+	avatar.className = "msg-author-badge-avatar";
+	setIcon(avatar, "user");
+
+	const name = document.createElement("span");
+	name.className = "msg-author-badge-name";
+	name.textContent = authorText;
+
+	const tail = document.createElement("span");
+	tail.className = "msg-author-badge-tail";
+	tail.append(createTailSvg());
+
+	badge.append(avatar, name, tail);
+
+	return { badge, tail };
+}
+
+// keeps the tail clear of the bubble's rounded corners, where it would otherwise hang off
+// the curve with a gap behind it. Given as room to leave at each end of the row, measured
+// back from where the tail sits within the badge.
+function tailInsets(row: HTMLElement, badge: HTMLElement, tail: HTMLElement): StickyInsets {
+	const radius = parseFloat(
+		getComputedStyle(row).getPropertyValue("--settings-msg-corner-radius")
+	) || 0;
+
+	const tailTop = tail.offsetTop;
+	const tailBottom = tailTop + tail.offsetHeight;
+
+	return {
+		top: Math.max(DEFAULT_TOP_INSET, radius - tailTop),
+		bottom: Math.max(0, radius + tailBottom - badge.offsetHeight)
+	};
+}
+
+/* Manual `position: sticky` for the reply icon - see sticky.ts for why CSS sticky isn't
+   usable here, and for the shared placement maths. This one keeps its own listeners rather
+   than joining the shared registry: the button is only visible while its row is hovered, so
+   exactly one row at a time is ever tracked. */
 function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLElement, ctx: MarkdownPostProcessorContext) {
 
 	let scroller: Element | null = null;
@@ -448,18 +507,13 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 		rafId = null;
 		if (!scroller) return;
 
-		const scrollerRect = scroller.getBoundingClientRect();
-		const rowRect = row.getBoundingClientRect();
-		const OFFSET = 16;
-		// keeps the icon from ever resting flush against the message's own top edge,
-		// clear of Reading View's code-block "edit" button in that same corner
-		const TOP_INSET = 18;
+		const offset = computeStickyOffset(
+			scroller.getBoundingClientRect(),
+			row.getBoundingClientRect(),
+			icon.offsetHeight
+		);
 
-		const min = rowRect.top + TOP_INSET;
-		const max = rowRect.bottom - icon.offsetHeight;
-		const target = Math.min(Math.max(scrollerRect.top + OFFSET, min), max);
-
-		icon.style.transform = `translateY(${target - rowRect.top}px)`;
+		icon.style.transform = `translateY(${offset}px)`;
 	};
 
 	const scheduleUpdate = () => {
@@ -490,8 +544,8 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 	row.addEventListener("mouseenter", start);
 	row.addEventListener("mouseleave", stop);
 
-	// safety net: guarantees the scroll/resize listeners are torn down if the row is
-	// destroyed mid-hover (e.g. a full note re-render) without a mouseleave ever firing
+	// safety net: tears the listeners down if the row is destroyed mid-hover (e.g. a full
+	// note re-render) without a mouseleave ever firing
 	const child = new MarkdownRenderChild(btn);
 	child.onunload = stop;
 	ctx.addChild(child);
@@ -541,7 +595,7 @@ function createMessageActionsMenu({
 	onToggle,
 	onHighlight
 } : CreateMenuParams) {
-	
+
     const filePath = ctx.sourcePath;
 	const app = plugin.app;
 
@@ -589,7 +643,7 @@ function createMessageActionsMenu({
     copyBtn.addEventListener("click", () => {
 		void (async () => {
 			await navigator.clipboard.writeText(msg.content);
-			
+
 			copyBtn.classList.add("fade");
 			setTimeout(() => {
 				setIcon(copyBtn, "checkmark");
@@ -618,33 +672,33 @@ function createMessageActionsMenu({
 		void (async () => {
 
 			e.stopPropagation();
-	
+
 			new ConfirmDeleteModal(app, () => {
 
 				void (async () => {
 					const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-		
+
 					const file = app.vault.getAbstractFileByPath(filePath);
 					if (!file) return;
 					if (!(file instanceof TFile)) return;
-		
+
 					const section = ctx.getSectionInfo(wrapper);
 					if (!section) return;
-			
+
 					let content = await app.vault.read(file);
 					const lines = content.split("\n");
-			
+
 					lines.splice(
 						section.lineStart,
 						section.lineEnd - section.lineStart + 1
 					);
-			
+
 					if (editor){
 						editor.setValue(lines.join("\n"));
 					} else {
 						await app.vault.modify(file, lines.join("\n"));
 					}
-			
+
 					new Notice("Deleted message");
 
 				})();
@@ -662,7 +716,7 @@ function createMessageActionsMenu({
 				if (plugin.activeEditor?.container === content.firstChild) {
 					return;
 				}
-				
+
 				const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 
 				const file = app.vault.getAbstractFileByPath(filePath);
@@ -671,7 +725,7 @@ function createMessageActionsMenu({
 
 				const section = ctx.getSectionInfo(wrapper);
 				if (!section) return;
-			
+
 				// Get current Message
 				let fileContent = await app.vault.read(file);
 				const lines = fileContent.split("\n");
@@ -692,7 +746,7 @@ function createMessageActionsMenu({
 				// Remove wrapper, create Message
 				const inner = blockLines.slice(1, -1).join("\n");
 				const msg = Message.fromString(inner);
-			
+
 				// Create Editor
 				const textarea = document.createElement("textarea");
 				textarea.className = "msg-inline-editor";
@@ -705,11 +759,11 @@ function createMessageActionsMenu({
 				const saveBtn = document.createElement("button");
 				saveBtn.textContent = "Save";
 				saveBtn.className = "msg-btn msg-editor-save-btn";
-			
+
 				const cancelBtn = document.createElement("button");
 				cancelBtn.textContent = "Cancel";
 				cancelBtn.className = "msg-btn msg-editor-cancel-btn";
-			
+
 				const btnRow = document.createElement("div");
 				btnRow.className = "msg-editor-buttons";
 				btnRow.append(saveBtn, cancelBtn);
@@ -717,7 +771,7 @@ function createMessageActionsMenu({
 				const editorWrapper = document.createElement("div");
 				editorWrapper.className = "msg-editor-wrapper";
 				editorWrapper.append(textarea, btnRow)
-			
+
 				// Cancel editor changes
 				const restore = () => {
 					content.empty();
@@ -730,7 +784,7 @@ function createMessageActionsMenu({
 					container: editorWrapper,
 					restore
 				});
-	
+
 				// Switch UI
 				const originalContent = content.cloneNode(true);
 				content.empty();
@@ -745,12 +799,12 @@ function createMessageActionsMenu({
 				};
 				textarea.addEventListener("input", autoResize);
 				autoResize();
-			
+
 				// Cancel Action
 				cancelBtn.addEventListener("click", () => {
 					restore();
 				});
-			
+
 				// Save Action
 				saveBtn.addEventListener("click", () => {
 
@@ -763,17 +817,10 @@ function createMessageActionsMenu({
 							section.lineEnd - section.lineStart + 1,
 							newMarkdown
 						);
-						
+
 						if (editor){
-
-							// changes whole document = inefficient + triggers yaml changes (rerender)
-							// editor.setValue(lines.join("\n"));
-
-							console.log(
-								{ line: section.lineStart, ch: 0 },
-								{ line: section.lineEnd + 1, ch: 0 }
-							)
-							
+							// replaceRange, not setValue: rewriting the whole document also
+							// rewrites the YAML, which triggers a full rerender
 							editor.replaceRange(
 								newMarkdown,
 								{ line: section.lineStart, ch: 0 },

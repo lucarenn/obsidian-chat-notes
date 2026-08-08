@@ -3,8 +3,8 @@ import ChatNotesPlugin from "./main";
 
 
 
-/* Which author a new message defaults to when the input's author field is left empty:
-   the file's chat owner (the YAML `author` key) or whoever sent the previous message. */
+// which author an empty author field falls back to: the chat owner (YAML `author`) or
+// whoever sent the previous message
 export type DefaultAuthorMode = "owner" | "previous";
 
 
@@ -17,6 +17,7 @@ export interface ChatConfig {
 	enableButtonShadow?: boolean;
 	showMessageAuthor?: boolean;
 	showMessageTimestamp?: boolean;
+	showAuthorBadges?: boolean;
 	scrollOnSend?: boolean;
     messageCornerRadius?: number;
 	chatId?: string;
@@ -34,6 +35,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	enableButtonShadow: boolean;
 	showMessageAuthor: boolean;
 	showMessageTimestamp: boolean;
+	showAuthorBadges: boolean;
 	scrollOnSend: boolean;
     messageCornerRadius: number;
 	messageHighlightColor: string;
@@ -47,8 +49,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	// specify the variables that should appear in global settings
 }
 
-/* Shared by the settings slider and the YAML override parser so the two can't drift apart
-   on what counts as a usable radius. */
+// shared by the settings slider and the YAML override parser, so the two can't drift apart
 export const CORNER_RADIUS_MIN = 0;
 export const CORNER_RADIUS_MAX = 50;
 
@@ -57,6 +58,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	enableButtonShadow: true,
 	showMessageAuthor: true,
 	showMessageTimestamp: true,
+	showAuthorBadges: false,
 	scrollOnSend: false,
 	messageCornerRadius: 12,
 	messageHighlightColor: "#e0adf0",
@@ -180,6 +182,18 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+		.setName("Show author badges")
+		.setDesc("Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else. Widens the gutter slightly while on. Override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.")
+		.addToggle(toggle => {
+			toggle
+				.setValue(this.plugin.settings.showAuthorBadges)
+				.onChange(async (value) => {
+					this.plugin.settings.showAuthorBadges = value;
+					await this.plugin.saveSettings();
+				});
+		});
+
+		new Setting(containerEl)
 		.setName("Message corner radius")
 		.setDesc("Determines how round corners of the message bubbles are. Override per file with 'msgCornerRadius: 20'.")
 		.addSlider(slider => {
@@ -232,7 +246,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Input field width offset")
-		.setDesc("Widens or narrows the message input field relative to the message bubbles it sits under. At 0 its edges line up with theirs.")
+		.setDesc("Widens or narrows the message input field relative to the message bubbles it sits under. At 0 its edges line up with the messages.")
 		.addSlider(slider => {
 			slider
 				.setLimits(-150, 150, 5) 	// min -150px, max +150px, step 5px
@@ -261,10 +275,8 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 }
 
 
-/* Same idea as the mode check below: only a value that actually reads as a boolean counts
-   as an override. A real YAML boolean arrives as one, a quoted "true"/"false" as a string,
-   and anything else (a typo, an empty key) resolves to undefined so resolveConfig drops it
-   and the global setting stands - rather than a stray word silently meaning "false". */
+// only a value that reads as a boolean counts as an override; anything else resolves to
+// undefined, so resolveConfig drops it and the global setting stands
 function parseBooleanOverride(value: unknown): boolean | undefined {
 	if (typeof value === "boolean") return value;
 	if (value === "true") return true;
@@ -272,11 +284,7 @@ function parseBooleanOverride(value: unknown): boolean | undefined {
 	return undefined;
 }
 
-/* Same idea for numbers: a real YAML number arrives as one, a quoted "20" as a string.
-   Anything that isn't a finite number (a typo, an empty key) resolves to undefined so the
-   global setting stands, rather than a stray value becoming a 0px or NaN radius. In-range
-   but out-of-bounds values are clamped instead of dropped - the intent ("as round as
-   possible") is clear enough to honour, it just can't go past what the slider allows. */
+// same for numbers, except out-of-bounds values are clamped rather than dropped
 function parsePixelOverride(value: unknown, min: number, max: number): number | undefined {
 	// Number("") is 0, so an empty string has to be rejected before the conversion
 	const parsed =
@@ -293,9 +301,7 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 
 	if (!fm) return {};
 
-	// YAML holds whatever the user typed, so only a recognised mode counts as an
-	// override - a typo falls through to the global setting instead of silently
-	// resolving to something the user never picked
+	// only a recognised mode counts as an override; a typo falls through to the global one
 	const defaultAuthorMode: DefaultAuthorMode | undefined =
 		fm.msgDefaultAuthor === "owner" || fm.msgDefaultAuthor === "previous"
 			? fm.msgDefaultAuthor
@@ -314,6 +320,7 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		messageCornerRadius: parsePixelOverride(fm.msgCornerRadius, CORNER_RADIUS_MIN, CORNER_RADIUS_MAX),
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
 		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
+		showAuthorBadges: parseBooleanOverride(fm.msgAuthorBadges),
 		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend)
 	};
 }

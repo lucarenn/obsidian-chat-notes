@@ -4,12 +4,9 @@ import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatCon
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
 import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor, formatTimestamp } from "./util"
 
-/* Base name for notes made by the "Create new chat note" command; a numeric suffix is
-   appended if the folder already holds one. */
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
 
-/* How long "Scroll to bottom on send" keeps the view pinned to the end while the message
-   it was sent for renders and settles (see scrollToBottomAfterSend). */
+// how long "Scroll to bottom on send" keeps re-scrolling (see scrollToBottomAfterSend)
 const SCROLL_ON_SEND_PIN_MS = 500;
 
 export default class ChatNotesPlugin extends Plugin {
@@ -41,7 +38,7 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!isChatFile(this.app, file)){
 			throw new Error("File is not a ChatNote");
 		}
-	
+
 		const source = await this.app.vault.read(file);
 		const [messages, pinnedMessagecount] = parseMessages(source);
 
@@ -51,16 +48,14 @@ export default class ChatNotesPlugin extends Plugin {
 			pinnedMessagecount
 		);
 
-		// the message-derived fields are filled in by the constructor; these come from
-		// the config instead, so they'd otherwise stay at their defaults until the first
-		// YAML change
+		// the message-derived fields come from the constructor; these come from the config
 		this.applyConfigToContext(context, this.getConfigCache(file));
 
 		return context;
 	}
 
 	async onload() {
-		
+
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText('Chat');
 
@@ -120,26 +115,22 @@ export default class ChatNotesPlugin extends Plugin {
 			},
 			hotkeys: [{ modifiers: ["Mod"], key: "ArrowUp" }],
 		});
-		
+
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
+		// on CLICK ANYWHERE: close the open message action menu
 		document.addEventListener("click", (event) => {
-			// on CLICK ANYWHERE
-			/* Detect clicks outside a message action menu and closes the current open menu */
-
 			if (!this.openMenu) return;
 			const target = event.target as HTMLElement;
-	
+
 			if (!this.openMenu.contains(target)) {
 				this.openMenu.classList.remove("menu-open");
 				this.openMenu = null;
 			}
 		});
 
+		// on FILE SWITCH: move/restore the chat input
 		this.registerEvent(
-			// on FILE SWITCH
-			/* Detect file switches and update chat input position */
-
 				this.app.workspace.on("active-leaf-change", async (leaf) => {
 					if (!leaf) return;
 					const view = leaf.view;
@@ -153,17 +144,14 @@ export default class ChatNotesPlugin extends Plugin {
 		  );
 
 		window.addEventListener("resize", () => {
-			// on WINDOW RESIZE
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!view) return;
 			this.updateChatInputPosition(view);
 
 		});
-		
-		this.registerEvent(
-			// on METADATA FILE CHANGES
-			/* Detect yaml changes and refresh/rerender the file if the settings are overridden or if chat state is changed */
 
+		// on METADATA CHANGE: reapply overridden settings, or rerender on a chat status change
+		this.registerEvent(
 			this.app.metadataCache.on("changed", (file) => {
 				void this.onYAMLChange(file).catch(err => {
 					console.error("Failed to handle YAML change", err);
@@ -182,7 +170,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor(
 			"chat-message",
 			async (source, el, ctx) => {
-				
+
 				const file = ctx.sourcePath
 				? this.app.vault.getAbstractFileByPath(ctx.sourcePath)
 				: null;
@@ -190,15 +178,14 @@ export default class ChatNotesPlugin extends Plugin {
 
 				// Only render if the file has type: chat in yaml properties
 				if (!this.getIsChatNote(file)) {
-					// for now fallback render for non chat notes.
 					// TODO remove render completely and display default code block
 
 					const fallback = document.createElement("pre");
 					const code = document.createElement("code");
-				
+
 					code.addClass("language-chat-message");
 					code.textContent = source;
-				
+
 					fallback.appendChild(code);
 					el.appendChild(fallback);
 
@@ -234,15 +221,13 @@ export default class ChatNotesPlugin extends Plugin {
 						!pinned
 					);
 				}
-				
-				// attach message to file html container (row wraps the bubble + reply button;
-				// entry.element stays pointed at the bubble itself so pin/highlight/scroll
-				// styling keeps targeting exactly what it did before)
+
+				// row wraps bubble + reply button; entry.element stays the bubble itself
 				el.appendChild(row);
 				entry.element = wrapper;
 
 
-				
+
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
 				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
 				if (note.lastAppliedConfig !== note.configCache) {
@@ -266,12 +251,12 @@ export default class ChatNotesPlugin extends Plugin {
 					content,
 					ctx.sourcePath,
 					// eslint-disable-next-line obsidianmd/no-plugin-as-component
-					this 
+					this
 				);
 
 			}
 		);
-		
+
 		// create input field
 		this.app.workspace.onLayoutReady(() => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -289,7 +274,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async onFileSwitch(newFile: TFile, view: MarkdownView) {
 
-		console.log("FILE SWITCH ")		
+		console.log("FILE SWITCH ")
 		const input = this.getChatInput();
 
 		// Save old file input
@@ -323,7 +308,7 @@ export default class ChatNotesPlugin extends Plugin {
 			// TODO check where to attach input field, depending on mode or calculate updates
 			if (view.getMode() === "preview") {}
 			view.contentEl.appendChild(input);
-			 
+
 		}
 
 		// Watch for iternal widow resizes (and update chat input field position)
@@ -338,7 +323,7 @@ export default class ChatNotesPlugin extends Plugin {
 		const oldFrontmatter = this.getChatNote(file).yamlCache;
 
 		// check if YAML was actually changed (event is also triggered by file writes)
-		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return; 
+		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return;
 		if (!newFrontmatter) return; // YAML was removed?
 		if (!(file instanceof TFile)) return;
 		this.getChatNote(file).yamlCache = newFrontmatter;
@@ -347,27 +332,24 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// safe new config metadata changes to cache
 		this.updateFileConfig(file);
-		
+
 		const previousStatus = this.getChatNote(file).isChatNote;
 		const currentStatus = isChatFile(this.app, file);
 		this.getChatNote(file).isChatNote = currentStatus;
 
 		if (currentStatus && (currentStatus === previousStatus)) {
 			// chat file YAML was changed -> apply styles AND the non-style settings
-			// (chat owner, default-author mode), which live on the archive context
 			await this.applyConfigToFile(file);
 
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
-			// TODO needs Async??
-			
+
 			setTimeout(() => {
 				// delay until UI + markdown settle
-				console.log("FULL RERENDER")		
+				console.log("FULL RERENDER")
 				void this.refreshFile(file);
 
-				// the Full rerender triggers the onFileSwitch, so updating input field position is done already
-				// this.updateChatInputPosition(view); //<- not needed
+				// the rerender triggers onFileSwitch, which repositions the input already
 
 			}, 300); // timeout 300ms prevents error in embed link plugin.
 		}
@@ -377,14 +359,14 @@ export default class ChatNotesPlugin extends Plugin {
 	setupResizeObserver(view: MarkdownView) {
 		const el = view.contentEl;
 		if (!el) return;
-	  
+
 		// Clean up previous observer if needed
 		this.resizeObserver?.disconnect();
-	  
+
 		this.resizeObserver = new ResizeObserver(() => {
 		  this.updateChatInputPosition(view);
 		});
-	  
+
 		this.resizeObserver.observe(el);
 	}
 
@@ -397,60 +379,49 @@ export default class ChatNotesPlugin extends Plugin {
 			view.containerEl.querySelector(".markdown-preview-sizer");
 		if (!inner) return;
 
-		const margin = 16;
-
-		/* Message bubbles sit inset from the content area by the reply gutter on both
-		   sides (see .chat-message), so the input takes that same inset on top of its own
-		   margin - otherwise it spans the full content width and overhangs the visible
-		   edge of every message it lines up under. Read off the DOM rather than repeated
-		   as a literal, so it stays tied to the single --msg-reply-gutter that positions
-		   the bubbles. An unset property parses to NaN, and means the bubbles aren't
-		   inset either - hence falling back to no gutter rather than to a guessed width. */
+		// bubbles sit inset from the content area by the reply gutter, so the input takes
+		// the same inset - read off the DOM to stay tied to the one --msg-reply-gutter
 		const gutter = parseFloat(
 			getComputedStyle(inner).getPropertyValue("--msg-reply-gutter")
 		) || 0;
-		const inset = gutter + margin;
 
-		/* User taste on top of that alignment: grows (or shrinks) the field around its own
-		   centre, so it stays centred on the same axis as the bubbles instead of drifting
-		   off to one side - hence half the offset coming back off the left edge. */
+		// grows/shrinks the field around its own centre, so it stays on the bubbles' axis
 		const widthOffset = this.settings.inputWidthOffset;
 
 		const rect = inner.getBoundingClientRect();
 		const parentRect = view.contentEl.getBoundingClientRect();
 		const offsetLeft = rect.left - parentRect.left;
 
-		// a negative width is an invalid declaration the browser drops entirely, which
-		// would strand the input at whatever width a wider pane last gave it
-		input.style.width = `${Math.max(0, rect.width - inset * 2 + widthOffset)}px`;
-		input.style.left = `${offsetLeft + inset - widthOffset / 2}px`;
+		// a negative width is dropped by the browser, stranding the input at its old width
+		input.style.width = `${Math.max(0, rect.width - gutter * 2 + widthOffset)}px`;
+		input.style.left = `${offsetLeft + gutter - widthOffset / 2}px`;
 
 	}
 
 	refreshOpenFiles() {
 		const openFiles = new Set<TFile>();
-	
+
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.view instanceof MarkdownView && leaf.view.file) {
 				openFiles.add(leaf.view.file);
 			}
 		});
-	
+
 		for (const file of openFiles) {
-			void this.refreshFile(file); 	// updateChatInputPosition is called inside 
+			void this.refreshFile(file); 	// updateChatInputPosition is called inside
 		}
 	}
 
 	async refreshFile(file: TFile) {
-		
+
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
-	
+
 		for (const leaf of leaves) {
 			const view = leaf.view;
-	
+
 			if (!(view instanceof MarkdownView)) continue;
 			if (view.file?.path !== file.path) continue;
-	
+
 			if (view.getMode() === "preview") {
 				// preview = reading mode
 				view.previewMode.rerender(true);
@@ -459,7 +430,7 @@ export default class ChatNotesPlugin extends Plugin {
 				type RebuildableLeaf = WorkspaceLeaf & {
 					rebuildView: () => Promise<void>;
 				};
-				
+
 				await (leaf as RebuildableLeaf).rebuildView();
 			}
 
@@ -469,9 +440,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Chat Note Creation */
 
-	/* Mirrors the ribbon icon to the setting. addRibbonIcon has no counterpart to remove
-	   one, so the element is kept and detached by hand - and only ever created once, since
-	   a second call would leave a duplicate icon behind. */
+	// addRibbonIcon has no removal counterpart, so the element is detached by hand - and
+	// only ever created once, since a second call would leave a duplicate icon behind
 	updateRibbonIcon() {
 		const wanted = this.settings.showRibbonIcon;
 
@@ -492,14 +462,10 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
-	/* The frontmatter a new chat note starts with. Only the keys nothing else can supply
-	   are written live: `type` is what marks the file as a chat at all (see isChatFile),
-	   and `author` - the chat owner - has no global setting to fall back on. The rest are
-	   commented out on purpose. A key that is actually present overrides the global setting
-	   permanently for that file, so writing them all out would freeze the note's appearance
-	   at creation time and silently ignore every later change to the global settings.
-	   Values shown are the current globals, so uncommenting one changes nothing until it is
-	   edited. */
+	/* Frontmatter for a new chat note. Only `type` (what marks a chat at all) and `author`
+	   (no global setting to fall back on) are written live - the rest stay commented out,
+	   since a present key overrides the global setting permanently and would freeze the
+	   note's appearance at creation time. */
 	buildChatNoteFrontmatter(): string {
 		const s = this.settings;
 
@@ -523,13 +489,11 @@ export default class ChatNotesPlugin extends Plugin {
 		].join("\n");
 	}
 
-	/* Creates a blank chat note and opens it. The input field and rendering follow on their
-	   own: the note only becomes a chat once metadataCache has parsed the new frontmatter,
-	   which fires onYAMLChange and takes the "chat status changed" path from there. */
+	// the note only becomes a chat once metadataCache parses the new frontmatter, which
+	// fires onYAMLChange and takes the "chat status changed" path from there
 	async createChatNote(): Promise<TFile> {
 
-		// resolves against the user's own "Default location for new notes" preference
-		// rather than hardcoding the vault root
+		// resolves against the user's "Default location for new notes" preference
 		const parent = this.app.fileManager.getNewFileParent(
 			this.app.workspace.getActiveFile()?.path ?? ""
 		);
@@ -571,7 +535,6 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!el) throw new Error("Rendered element missing.");
 
 		const pinState = !(msg.header.extra.pinned === "true")
-		// message is now being unpinned
 		this.applyMessageHighlightStyle(el, config, pinState);
 		// update context
 		msg.header.extra.pinned = `${pinState}`;
@@ -609,8 +572,7 @@ export default class ChatNotesPlugin extends Plugin {
 		await this.updateReplyBanner();
 	}
 
-	/* Cancels the pending reply (if any) and reverts the input to a normal send,
-	   used by both the input banner's cross button and after a message is sent. */
+	// used by the banner's cross button and after a message is sent
 	async handleCancelReply() {
 
 		if (!this.currentFile) return;
@@ -625,8 +587,7 @@ export default class ChatNotesPlugin extends Plugin {
 		await this.updateReplyBanner();
 	}
 
-	/* Syncs the input's reply banner (shown/hidden + preview text) with the current
-	   file's pending reply target. */
+	// syncs the input's reply banner with the current file's pending reply target
 	async updateReplyBanner() {
 
 		if (!this.chatReplyBannerEl || !this.chatReplyTextEl) return;
@@ -663,15 +624,15 @@ export default class ChatNotesPlugin extends Plugin {
 		if (this.activeEditor?.container === newEditor.container) {
 			return;
 		}
-	
+
 		// Close previous editor
 		if (this.activeEditor) {
 			this.activeEditor.restore();
 		}
-	
+
 		this.activeEditor = newEditor;
 	}
-	
+
 	clearActiveEditor(editor: { container: HTMLElement }) {
 		if (this.activeEditor?.container === editor.container) {
 			this.activeEditor = null;
@@ -679,9 +640,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	/* Builds a full message (header + content) and appends it to the file. `overrides`
-	   carries whatever the user typed into the input's header row; anything left empty
-	   there falls back to the configured default. */
+	// `overrides` carries whatever was typed into the input's header row; empty falls
+	// back to the configured default
 	async appendMessage(file: TFile, content: string, overrides?: {
 		author?: string;
 		timestamp?: string;
@@ -717,25 +677,18 @@ export default class ChatNotesPlugin extends Plugin {
 			id: header.id,
 			message,
 			startLine,
-			// lastIndexOf, so a "````" line inside the content can't be mistaken for the
-			// closing fence - the real one is always last
+			// lastIndexOf, so a "````" line inside the content can't be mistaken for the fence
 			endLine: startLine + blockLines.lastIndexOf("````")
 		});
 
 		await this.app.vault.modify(file, prefix + raw);
 	}
 
-	/* Jump to the end of the chat after a message was sent (the "Scroll to bottom on send"
-	   setting). A single jump would land at the document's *old* bottom: vault.modify only
-	   schedules the codeblock processor, so at this point the new message has neither been
-	   rendered nor added its height. Waiting for it to render first is not the answer
-	   either - both view modes only render near the viewport, so a message appended below
-	   the fold renders *because* something scrolled to it, and waiting on it before
-	   scrolling just stalls until the timeout.
-
-	   So this scrolls immediately and keeps re-scrolling for a short window instead: the
-	   first jump is instant feedback, and each one drags the render (and the growth it
-	   brings) along until the document stops moving. */
+	/* Jump to the end of the chat after a send. A single jump would land at the document's
+	   *old* bottom - vault.modify only schedules the codeblock processor. Waiting for the
+	   render instead deadlocks: both view modes only render near the viewport, so a message
+	   below the fold renders *because* something scrolled to it. Hence: scroll immediately,
+	   then keep re-scrolling for a short window, dragging the render along. */
 	scrollToBottomAfterSend(file: TFile) {
 
 		const view = this.app.workspace.getLeavesOfType("markdown")
@@ -747,8 +700,6 @@ export default class ChatNotesPlugin extends Plugin {
 
 		const pin = () => {
 			scrollDocument(view, "bottom");
-			// short enough that it can't fight the user for long if they scroll away
-			// mid-window, long enough to outlast the render of an ordinary message
 			if (performance.now() - start < SCROLL_ON_SEND_PIN_MS) {
 				requestAnimationFrame(pin);
 			}
@@ -770,13 +721,10 @@ export default class ChatNotesPlugin extends Plugin {
 		const context = await this.getArchiveContext(file);
 		const entry = context.getEntry(msgId);
 
-		// Reading View and Live Preview both only render messages near the current
-		// scroll position (CodeMirror unmounts far-off widgets entirely, and Reading
-		// View lazily renders long notes in sections) - entry.element is undefined, or
-		// still points at an old detached node, for any message that hasn't been
-		// rendered/re-rendered since it last scrolled into view. Force Obsidian to jump
-		// to its source line first (which mounts it via our codeblock processor), then
-		// wait for that render to land before doing the precise scroll + highlight.
+		// Both view modes only render messages near the current scroll position, so
+		// entry.element is missing or detached for anything off screen. Jump to its source
+		// line first (which mounts it via the codeblock processor), then wait for that
+		// render before the precise scroll + highlight.
 		if (!entry.element || !entry.element.isConnected) {
 			const view = this.app.workspace.getLeavesOfType("markdown")
 				.map(leaf => leaf.view)
@@ -811,8 +759,7 @@ export default class ChatNotesPlugin extends Plugin {
 		return true;
 	}
 
-	/* Polls (via rAF) until the codeblock processor has (re)rendered this entry's
-	   element into the live DOM, or gives up after timeoutMs so callers never hang. */
+	// polls until the codeblock processor has (re)rendered this entry into the live DOM
 	async waitForRenderedElement(entry: MessageEntry, timeoutMs = 1500): Promise<void> {
 		const start = performance.now();
 
@@ -834,9 +781,8 @@ export default class ChatNotesPlugin extends Plugin {
 			const check = () => {
 				const rect = element.getBoundingClientRect();
 
-				// Overlap-based (not full-containment) so this also resolves for messages
-				// taller than the viewport, which full containment could never satisfy -
-				// scrollIntoView({block: "center"}) already centers as best it can there.
+				// overlap-based, not full containment, so it also resolves for messages
+				// taller than the viewport
 				let visible: boolean;
 
 				if (container === window) {
@@ -865,7 +811,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async loadSettings() {
 		const data = (await this.loadData()) as Partial<ChatNotesPluginSettings> ?? {};
-		
+
 		this.settings = {
 			...DEFAULT_SETTINGS,
 			...data,
@@ -899,31 +845,25 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async applyStyles(container: HTMLElement, config: ChatConfig, context: ArchiveContext) {
 
-		// console.log(container)
 		if (config.messageBgColor) {
 			container.style.setProperty(
 				"--settings-msg-bg-color",
 				config.messageBgColor
 			);
-			// the header's author button and the action-menu icons sit directly on the
-			// bubble, so they follow the same contrast pick as the reply banner instead
-			// of Obsidian's theme text color - which an extreme bubble color can leave
-			// nearly invisible (see .msg-author / .msg-action-btn)
+			// header/action icons sit on the bubble, so they follow the same contrast pick
 			container.style.setProperty(
 				"--settings-msg-text-color",
 				getReadableTextColor(config.messageBgColor)
 			);
 		}
-	  
+
 		container.style.setProperty(
 		  "--settings-msg-corner-radius",
 		  `${config.messageCornerRadius}px`
 		);
 
-		// the input field intentionally stays rounder ("pill" shaped) than the message
-		// bubbles, but tracks the same setting with a fixed offset so both scale together.
-		// Named --chat-input-radius (not --input-radius) since Obsidian's own theme
-		// already defines --input-radius globally for every native input/button.
+		// the input stays rounder than the bubbles, but tracks the same setting.
+		// Named --chat-input-radius, since Obsidian's theme owns --input-radius globally.
 		container.style.setProperty(
 			"--chat-input-radius",
 			`${(config.messageCornerRadius ?? 12) + 8}px`
@@ -935,11 +875,13 @@ export default class ChatNotesPlugin extends Plugin {
 			container.classList.add("menu-btn-no-shadow");
 		}
 
-		// hidden by a class on the container rather than by skipping the buttons when the
-		// header is built: this path reruns on every settings/YAML change, so both toggles
-		// take effect on the messages already on screen instead of needing a rerender
+		// toggled by class on the container, not by skipping the buttons when the header is
+		// built - so these take effect on messages already on screen, without a rerender
 		container.classList.toggle("msg-header-no-author", config.showMessageAuthor === false);
 		container.classList.toggle("msg-header-no-timestamp", config.showMessageTimestamp === false);
+
+		// widens the gutter via --msg-reply-gutter and reveals the badges every row carries
+		container.classList.toggle("msg-show-author-badges", config.showAuthorBadges === true);
 
 		if (config.messageFlashColor){
 			container.style.setProperty(
@@ -966,14 +908,11 @@ export default class ChatNotesPlugin extends Plugin {
 			);
 		}
 
-		if (context.pinnedMessagesAmount > 0){
-			context.refreshStylesPerMessage(config);
-		}
+		// unconditional: it also re-sides the author badges when `author` changes
+		context.refreshStylesPerMessage(config);
 	}
 
-	/* The config that isn't CSS. applyStyles pushes the visual settings onto the DOM
-	   container and lets them cascade; these are plain values the message-building code
-	   reads instead, so they need their own path onto the context. */
+	// the config that isn't CSS - plain values the message-building code reads
 	applyConfigToContext(context: ArchiveContext, config: ChatConfig) {
 		context.chatAuthor = config.author;
 		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
@@ -988,15 +927,17 @@ export default class ChatNotesPlugin extends Plugin {
 
 		if (!color) return;
 
-		msg.style.setProperty(
+		// set on the row, not the bubble: the speech-bubble tail is a sibling of the bubble
+		// (it has to be - see .chat-message's overflow:hidden) and can't inherit from it
+		const target = msg.parentElement ?? msg;
+
+		target.style.setProperty(
 			"--settings-msg-bg-color",
 			color
 		);
-		// pinned messages override the bubble color on the element itself, so the header's
-		// contrast pick has to be re-made against *this* background - the container-level
-		// one applyStyles set is for the normal bubble color and would be the wrong choice
-		// whenever the two colors differ in brightness
-		msg.style.setProperty(
+		// re-made against *this* background - the container-level pick is for the normal
+		// bubble color and would be wrong whenever the two differ in brightness
+		target.style.setProperty(
 			"--settings-msg-text-color",
 			getReadableTextColor(color)
 		);
@@ -1023,6 +964,12 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		}
 
+		// the author badge setting widens the gutter the input's geometry derives from;
+		// the ResizeObserver won't fire for it, since contentEl itself doesn't resize
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view?.file?.path === file.path) {
+			this.updateChatInputPosition(view);
+		}
 	}
 
 	/* Helper Methods */
@@ -1046,7 +993,7 @@ export default class ChatNotesPlugin extends Plugin {
 			? input.value
 			: "";
 	}
-	
+
 	setInputValue(value: string) {
 		//TODO lazy initialize? -> need to get view
 		const input = this.chatInputEl.querySelector("textarea, input");
@@ -1071,14 +1018,13 @@ export default class ChatNotesPlugin extends Plugin {
     }
 
 	getConfigCache(file: TFile){
-		// helper method to avoid checking if configCash is undefined or not
 		let config = this.getChatNote(file).configCache;
 		if (config === undefined){
 			config = this.updateFileConfig(file);
 			this.getChatNote(file).configCache = config;
 			if (config === undefined) {
 				throw Error("unexpected Error: File could not update config. File might not be a TFile")
-			} 
+			}
 		}
 		return config;
 	}
@@ -1095,11 +1041,11 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async getArchiveContext(file: TFile): Promise<ArchiveContext> {
 
- 		// promise because CBP works asynchronously, otherwise it will calculate it for multiple messages
+ 		// the promise is cached, not the context: the codeblock processor runs concurrently
+		// for every message, and would otherwise build one context per message
 		let contextPromise = this.archiveContexts.get(file.path);
 		if (!contextPromise) {
-			// lazy context initialization
-			// -> scan the whole file and establish context
+			// lazy init -> scan the whole file and establish context
 			console.log("generating context:", file.path);
 			contextPromise = this.createArchiveContext(file);
 			this.archiveContexts.set(
@@ -1126,7 +1072,7 @@ export default class ChatNotesPlugin extends Plugin {
 		const pinnedLine = headerLines.findIndex(
 			line => line.startsWith("pinned:")
 		);
-	
+
 		if (pinnedLine !== -1) {
 			lines[start + pinnedLine] =
 				`pinned: ${pinned}`;
@@ -1138,7 +1084,7 @@ export default class ChatNotesPlugin extends Plugin {
 				`pinned: ${pinned}`
 			);
 		}
-	
+
 		// this will trigger the CodeBlockProcessor to rerun
 		await this.app.vault.modify(
 			file,
