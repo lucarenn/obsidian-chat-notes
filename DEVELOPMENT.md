@@ -23,7 +23,7 @@ step in between.
 
 ## The file format
 
-A chat note is an ordinary markdown file with `type: chat` in its frontmatter. Every
+A chat note is an ordinary markdown file with `type: chat-note` in its frontmatter. Every
 message is one fenced block:
 
 `````text
@@ -303,6 +303,24 @@ plain `keydown` listener sees it, so the input pushes its own `Scope` while focu
 also what lets `Mod+Up` mean "open the header row" here while whatever the user has bound it
 to globally still works everywhere else. The commands themselves ship **no default hotkeys**,
 per Obsidian's guidelines — don't add any back.
+
+**The renumber scans blocks, it does not use the message map.** `recalculateMessageIds` is the
+repair path for a file whose ids were broken by hand, and the commonest break is a duplicate —
+which `parseMessages` cannot represent, since its map keeps one entry per id and the other block
+vanishes. So it uses `findMessageBlocks`, which returns every block in file order, duplicates
+included. The two read the id differently for the same reason: `extractMessageIdFromSource`
+takes it off the block's *first line* (fine for blocks this plugin wrote, since `Header.toString`
+emits `id` first), while `findMessageBlocks` searches the whole header, because
+`Header.fromLines` accepts the keys in any order and a hand-edited block may well not lead with
+`id`. Whatever predicate finds the id line must match the one that rewrites it — if one accepts
+an indented key and the other doesn't, that block keeps its old id and collides with the new
+numbering.
+
+Headers are patched line by line rather than re-serialised, for the reason `toggleMessagePinned`
+patches. The write replaces from the first block to the end of the document: dropping a
+`reply_to` changes the line count, so the blocks' own `endLine` no longer describes the patched
+text. The duplicate notice fires from `createArchiveContext` only — `invalidateArchiveContext`
+runs on every save, and a block being typed passes through states where its id repeats another.
 
 **Writes go through the editor when there is one, never `setValue`.** `withMessageBlock`
 prefers `editor.replaceRange` on the *target file's* view — it preserves undo history and the

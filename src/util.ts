@@ -1,10 +1,10 @@
 import { MarkdownView, App, TFile, TAbstractFile} from "obsidian";
-import { Message, MessageEntry } from "./types"
+import { Message, MessageEntry, MessageBlock } from "./types"
 
 
 export function isChatFile(app: App, file: TFile): boolean {
 	const cache = app.metadataCache.getFileCache(file);
-	return cache?.frontmatter?.type === "chat";
+	return cache?.frontmatter?.type === "chat-note";
 }
 
 // kept between calls - all this needs is the 2d context's color parser
@@ -156,9 +156,12 @@ export function extractMessageIdFromSource(source: string): string {
 	return value;
 }
 
-export function parseMessages(source: string): [Map<string, MessageEntry>, number] {
+// third element: ids used by more than one block. The map can only keep one of them, so the
+// others are invisible to everything downstream until the user renumbers the file
+export function parseMessages(source: string): [Map<string, MessageEntry>, number, string[]] {
 
 	const messages = new Map<string, MessageEntry>();
+	const duplicateIds = new Set<string>();
 	const lines = source.split("\n");
 	let insideBlock = false;
 	let currentBlock: string[] = [];
@@ -185,6 +188,10 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 			try {
 				const rawMessage = currentBlock.join("\n");
 				const message = Message.fromString(rawMessage);
+
+				if (messages.has(message.header.id)) {
+					duplicateIds.add(message.header.id);
+				}
 
 				messages.set(
 					message.header.id,
@@ -215,7 +222,54 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 		}
 	}
 
-	return [messages, pinnedMessageCounter];
+	return [messages, pinnedMessageCounter, Array.from(duplicateIds)];
+}
+
+/* Every block in file order, duplicates included - which is what separates this from
+   parseMessages, whose map holds only one block per id. Only the renumber needs it. */
+export function findMessageBlocks(source: string): MessageBlock[] {
+
+	const blocks: MessageBlock[] = [];
+	const lines = source.split("\n");
+	let insideBlock = false;
+	let currentBlock: string[] = [];
+	let currentStartLine = 0;
+
+	for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+		const line = lines[lineNumber];
+		if (line === undefined) continue;
+
+		if (!insideBlock && line.trim() === "````chat-message") {
+			insideBlock = true;
+			currentBlock = [];
+			currentStartLine = lineNumber;
+			continue;
+		}
+
+		if (insideBlock && line.trim() === "````") {
+			insideBlock = false;
+
+			/* Searched across the header rather than read off the first line the way
+			   extractMessageIdFromSource does: Header.fromLines accepts the keys in any order,
+			   so a hand-written block can carry its id below reply_to - and this runs on files
+			   that were edited by hand. Header only, since a body line may start with "id:". */
+			const headerEnd = currentBlock.indexOf("~~~");
+			const header = headerEnd === -1 ? currentBlock : currentBlock.slice(0, headerEnd);
+			const id = header.find(l => l.trimStart().startsWith("id:"))
+				?.trimStart().slice("id:".length).trim();
+
+			// a block with no readable id can't be renumbered, and must not stop the rest
+			if (id) {
+				blocks.push({ id, startLine: currentStartLine, endLine: lineNumber });
+			}
+
+			continue;
+		}
+
+		if (insideBlock) currentBlock.push(line);
+	}
+
+	return blocks;
 }
 
 /* Every html container the file is currently rendered in - one per open leaf. Flat and

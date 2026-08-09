@@ -8,6 +8,18 @@ Why use this plugin?
 
 # Installation
 
+Chat Notes is not in the community plugin store yet — it is awaiting review. Until then:
+
+**Manually**
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/lucarenn/obsidian-chat-plugin/releases/latest).
+2. In your vault, create the folder `.obsidian/plugins/chat-notes/` and put the three files in it.
+3. Reload Obsidian and enable **Chat Notes** under **Settings → Community plugins**.
+
+**With [BRAT](https://github.com/TfTHacker/obsidian42-brat)**
+
+Add `lucarenn/obsidian-chat-plugin` as a beta plugin. BRAT installs it and keeps it up to date.
+
 # Usage
 
 ## Creating a chat note
@@ -18,11 +30,11 @@ To turn an existing note into a chat note, add this to its frontmatter (section 
 
 ```yaml
 ---
-type: chat
+type: chat-note
 ---
 ```
 
-`type: chat` is what the plugin looks for. Without it a note renders normally, and every
+`type: chat-note` is what the plugin looks for. Without it a note renders normally, and every
 message block in it stays a plain code block.
 
 ## Shortcuts
@@ -38,9 +50,9 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 
 ## Commands
 
+There are a handful of commands that make your life easier working with this plugin. 
 Every command except **Create new chat note** is only available inside a chat note.
-None of them ship a default hotkey, so that none can collide with a binding you already use —
-assign your own under **Settings → Hotkeys**.
+No default hotkeys are set; you can assign your own under **Settings → Hotkeys**. Having shortcuts to move the cursor into the input field or scroll to top/bottom makes it much faster working with chat files, without your hands leaving the keyboard.
 
 | Command |
 | --- |
@@ -48,20 +60,30 @@ assign your own under **Settings → Hotkeys**.
 | Focus chat input |
 | Scroll to bottom |
 | Scroll to top |
+| Recalculate message ids |
 
-> If you bind **Scroll to top** to `Mod` + `↑`, note that the chat input claims that
-> combination while it or a header field has focus, where it opens or closes the author/time
-> row instead.
+> You can still assign **Scroll to top** to `Mod` + `↑`. Just note that when the chat input is focused, the combination will open or close the author/time row instead.
+
+### Repairing message ids
+
+Every message carries an `id` (which is also used by replies). Editing a note by hand can break that: duplicating a block, changing a number, pasting messages in from another chat. A duplicate id is especially bad: two messages claim the same number, and only one of them still responds to
+pin, edit and delete.
+
+**Recalculate message ids** repairs the open chat note. It asks for confirmation, then renumbers
+every message `1, 2, 3…` in the order they appear and rewrites every reply to match. A reply
+whose message is no longer in the file loses its link, since its old number would now belong to
+an unrelated message. It will report the count when the command finishes. Nothing else in the file is touched, and you can reverse the command with the editor's undo in one step.
+
+The plugin also checks for duplicates when it first reads a chat note and notifies you if it finds any.
 
 ## Overriding global settings per chat note
 
 Global settings live under **Settings → Community plugins → Chat Notes**.
-Here many features like various colors, corner radius, visible attributes in the  message header, input width and height, default author, ribbon icon visibility and more can be adjusted. By default these apply to *all* chat notes. If you want different settings for different chats, you can override most of the settings per file by adding the matching key to that note's frontmatter:
+Here many features like various colors, corner radius, visible attributes in the message header, input width and height, default author, ribbon icon visibility and more can be adjusted. By default these apply to *all* chat notes. If you want different settings for different chats, you can override most of the settings per file by adding the matching key to that note's frontmatter:
 
 ```yaml
-# Example
 ---
-type: chat
+type: chat-note
 author: Alice
 msgColor: "#7f6df2"
 msgCornerRadius: 20
@@ -72,11 +94,11 @@ msgAuthorBadges: true
 A few things to know:
 
 - Overrides apply **only** to that note. Everything that is not listed keeps its global value.
-- Most changes should apply live, without reopening the note.
+- All changes should apply live; if not, try refreshing the view or reopening the note.
 - A typo or an empty key is ignored and will still use its global setting value.
-- Colors accept any CSS color: `#2b5d8a`, `#abc`, `white`, `rgb(43 93 138)`.
-    - If you **paste** the frontmatter directly into the file or **manually write** it (i.e. its a blank file or has no properties yet added) use quotes for values starting with `#`, or YAML reads them as a comment. Also make sure that the first `---` is at the very top of the file (no empty line above), or Obsidian will not recognize the values as properties. If done correctly, Obsidian should format the frontmatter into a properties table. There are other ways to add properties to a file (there is a command for it aswell), refer to Obsidians info page about [Properties](https://obsidian.md/help/properties).
-    - If you input a value starting with `#` via the properties table (once Obsidian has recognized the keys) you should **not** use quotes, just put the value as is.
+- Colors accept any CSS color: `#2b5d8a`, `#abc`, `white`, `rgb(43 93 138)` etc.
+    - If you **paste** the frontmatter directly into the file or **manually write** it (i.e. it's a blank file or has no properties added yet) use quotes for values starting with `#`, or YAML reads them as a comment. Also make sure that the first `---` is at the very top of the file (no empty line above), or Obsidian will not recognize the values as properties. If done correctly, Obsidian should format the frontmatter into a properties table. There are other ways to add properties to a file as well (for example via command); refer to Obsidian's info page about [Properties](https://obsidian.md/help/properties).
+    - If you input a value starting with `#` via the properties table or with the command (once Obsidian has recognized the keys) you should **not** use quotes, just put the value as is.
 
 ### Available overrides
 
@@ -106,11 +128,10 @@ These have no per-note override and always apply everywhere:
 - Input field width offset
 - Max input field height
 
-## Compatibility
-
 
 # Development
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file format, and the non-obvious bits of the implementation.
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file format, and the
-non-obvious bits of the implementation.
+If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
+In the future, additions like virtualized rendering, markdown message editing/writing and better plugin compatibility might be implemented.

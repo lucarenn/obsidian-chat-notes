@@ -97,6 +97,13 @@ export class ArchiveContext {
 
 }
 
+// a block's position in one specific text, for the renumber to patch (see findMessageBlocks)
+export interface MessageBlock {
+	id: string;
+	startLine: number;
+	endLine: number;
+}
+
 export interface MessageEntry {
 	id: string;
 	message: Message;

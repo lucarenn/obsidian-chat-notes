@@ -276,7 +276,7 @@
 }
 
 /* Confirm Deletion Pop Up */
-.msg-delete-confirm-buttons {
+.chat-confirm-buttons {
     display: flex;
     justify-content: flex-end;
     gap: 10px;
