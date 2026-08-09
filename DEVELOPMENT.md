@@ -299,9 +299,10 @@ defines `--input-radius` / `--input-border-width` globally, and reusing those na
 all of Obsidian's UI.
 
 **Hotkeys go through `Scope`.** Obsidian's global keymap can swallow `Mod+Enter` before a
-plain `keydown` listener sees it, so the input pushes its own `Scope` while focused. `Mod+Up`
-needs this doubly — it is globally bound to "Scroll to Top" and only means "open the header
-row" while the input or a header field has focus.
+plain `keydown` listener sees it, so the input pushes its own `Scope` while focused. That is
+also what lets `Mod+Up` mean "open the header row" here while whatever the user has bound it
+to globally still works everywhere else. The commands themselves ship **no default hotkeys**,
+per Obsidian's guidelines — don't add any back.
 
 **Writes go through the editor when there is one, never `setValue`.** `withMessageBlock`
 prefers `editor.replaceRange` on the *target file's* view — it preserves undo history and the

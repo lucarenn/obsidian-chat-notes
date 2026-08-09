@@ -2,8 +2,8 @@
 	"id": "obsidian-chat-plugin",
 	"name": "Chat Notes",
 	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Create Chats inside your Nodes, consisiting of individual messages.",
+	"minAppVersion": "1.4.0",
+	"description": "Turn a note into a chat, where each message is its own block with an author and a timestamp.",
 	"author": "Luca Renner",
 	"authorUrl": "https://github.com/lucarenn",
 	"isDesktopOnly": false

@@ -1,4 +1,4 @@
-import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
+import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton } from "./ui"
@@ -112,35 +112,34 @@ export default class ChatNotesPlugin extends Plugin {
 				}
 				return canFocus;
 			},
-			hotkeys: [{ modifiers: ["Mod"], key: "m" }],
 		});
 
+		/* No default hotkeys on any of these: Obsidian's guidelines call them out as a source
+		   of conflicts with other plugins and with bindings the user already set. */
 		this.addCommand({
 			id: "scroll-to-bottom",
-			name: "Scroll to Bottom",
+			name: "Scroll to bottom",
 			checkCallback: (checking) => {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				const canRun = !!view?.file && this.getIsChatNote(view.file);
 				if (canRun && !checking) {
-					scrollDocument(view!, "bottom");
+					scrollDocument(view, "bottom");
 				}
 				return canRun;
 			},
-			hotkeys: [{ modifiers: ["Mod"], key: "ArrowDown" }],
 		});
 
 		this.addCommand({
 			id: "scroll-to-top",
-			name: "Scroll to Top",
+			name: "Scroll to top",
 			checkCallback: (checking) => {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				const canRun = !!view?.file && this.getIsChatNote(view.file);
 				if (canRun && !checking) {
-					scrollDocument(view!, "top");
+					scrollDocument(view, "top");
 				}
 				return canRun;
 			},
-			hotkeys: [{ modifiers: ["Mod"], key: "ArrowUp" }],
 		});
 
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
@@ -324,14 +323,19 @@ export default class ChatNotesPlugin extends Plugin {
 					this.applyMessageHighlightStyle(row, config, true)
 				}
 
-				// Render message content as markdown
+				/* Rendered under a child bound to THIS block, not under the plugin: anything
+				   the markdown mounts (embeds, other plugins' processors) then unloads when
+				   the block does. Passing the plugin kept every message ever rendered alive
+				   until the plugin unloaded. */
+				const renderChild = new MarkdownRenderChild(content);
+				ctx.addChild(renderChild);
+
 				await MarkdownRenderer.render(
 					this.app,
 					msg.content,
 					content,
 					ctx.sourcePath,
-					// eslint-disable-next-line obsidianmd/no-plugin-as-component
-					this
+					renderChild
 				);
 
 			}
@@ -364,8 +368,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// return if new file is not a chat file
 		if (!newFile || !this.getIsChatNote(newFile)) {
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			input.style.display = "none";
+			input.setCssStyles({ display: "none" });
 			this.resizeObserver?.disconnect();
 			this.currentFile = null;
 			void this.updateReplyBanner();
@@ -399,8 +402,7 @@ export default class ChatNotesPlugin extends Plugin {
 		// bound to this view, so the button filters the file it belongs to
 		addPinButton(view, () => this.togglePinFilter(view));
 
-		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-		input.style.display = "flex";
+		input.setCssStyles({ display: "flex" });
 		// contentEl, not a mode-specific element: it survives a reading <-> live preview switch,
 		// and the part that does depend on mode is picked in updateChatInputPosition
 		if (input.parentElement !== view.contentEl) {
@@ -882,14 +884,14 @@ export default class ChatNotesPlugin extends Plugin {
 			const deltaY = firstTop - row.getBoundingClientRect().top;
 			if (deltaY === 0) continue;
 
-			row.style.transform = `translateY(${deltaY}px)`;
-			row.style.transition = "transform 0s";
-			row.offsetHeight;	// forced reflow, so the transition below actually runs
-			row.style.transition = "transform 180ms cubic-bezier(0.34, 1.35, 0.64, 1)";
-			row.style.transform = "";
+			// setCssStyles rather than .style.x =, per the Obsidian guidelines. These are
+			// measured values, so they can't move to a class
+			row.setCssStyles({ transform: `translateY(${deltaY}px)`, transition: "transform 0s" });
+			void row.offsetHeight;	// forced reflow, so the transition below actually runs
+			row.setCssStyles({ transition: "transform 180ms cubic-bezier(0.34, 1.35, 0.64, 1)", transform: "" });
 
 			row.addEventListener("transitionend", () => {
-				row.style.transition = "";
+				row.setCssStyles({ transition: "" });
 			}, { once: true });
 		}
 	}

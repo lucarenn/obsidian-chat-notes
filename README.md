@@ -39,17 +39,19 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 ## Commands
 
 Every command except **Create new chat note** is only available inside a chat note.
-Default hotkeys can be changed under **Settings → Hotkeys**.
+None of them ship a default hotkey, so that none can collide with a binding you already use —
+assign your own under **Settings → Hotkeys**.
 
-| Command | Default hotkey |
-| --- | --- |
-| Create new chat note | — |
-| Focus chat input | `Mod` + `M` |
-| Scroll to Bottom | `Mod` + `↓` |
-| Scroll to Top | `Mod` + `↑` |
+| Command |
+| --- |
+| Create new chat note |
+| Focus chat input |
+| Scroll to bottom |
+| Scroll to top |
 
-> `Mod` + `↑` scrolls to the top everywhere *except* while the chat input or a header field
-> has focus, where it opens or closes the author/time row instead.
+> If you bind **Scroll to top** to `Mod` + `↑`, note that the chat input claims that
+> combination while it or a header field has focus, where it opens or closes the author/time
+> row instead.
 
 ## Overriding global settings per chat note
 

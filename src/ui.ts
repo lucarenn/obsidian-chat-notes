@@ -176,10 +176,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 
 	const resizeInput = () => {
 		const maxHeight = plugin.settings.inputMaxHeight;
-		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-		textarea.style.height = "auto";
-		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-		textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+		// "auto" first so scrollHeight reports the content height rather than the current one
+		textarea.setCssStyles({ height: "auto" });
+		textarea.setCssStyles({ height: `${Math.min(textarea.scrollHeight, maxHeight)}px` });
 	};
 
 	textarea.oninput = () => {
@@ -288,19 +287,24 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 }
 
 
+/* Which views already carry each action. WeakSets rather than a flag stashed on the view:
+   the view stays untyped either way, and these drop their entry when the view is collected. */
+const viewsWithScrollActions = new WeakSet<MarkdownView>();
+const viewsWithPinAction = new WeakSet<MarkdownView>();
+
 export function addScrollButtons(view: MarkdownView) {
 
 	if (!view) return;
 
 	// Avoid adding multiple times
-	if ((view as any)._scrollButtonAdded) return;
-	(view as any)._scrollButtonAdded = true;
+	if (viewsWithScrollActions.has(view)) return;
+	viewsWithScrollActions.add(view);
 
-	view.addAction("arrow-up", "Scroll to top", (evt) => {
+	view.addAction("arrow-up", "Scroll to top", () => {
 		scrollDocument(view, "top")
 	});
 
-	view.addAction("arrow-down", "Scroll to bottom", (evt) => {
+	view.addAction("arrow-down", "Scroll to bottom", () => {
 		scrollDocument(view, "bottom")
 	});
 }
@@ -311,13 +315,10 @@ export function addPinButton(view: MarkdownView, onPress: ()=>void) {
 	if (!view) return;
 
 	// Avoid adding multiple times
-	if ((view as any)._pinButtonAdded) return;
-	(view as any)._pinButtonAdded = true;
+	if (viewsWithPinAction.has(view)) return;
+	viewsWithPinAction.add(view);
 
-	view.addAction("pin", "Show Pinned Messages", async (evt) => {
-		await onPress();
-	});
-
+	view.addAction("pin", "Show pinned messages", () => onPress());
 }
 
 /**
@@ -512,7 +513,7 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 			icon.offsetHeight
 		);
 
-		icon.style.transform = `translateY(${offset}px)`;
+		icon.setCssStyles({ transform: `translateY(${offset}px)` });
 	};
 
 	const scheduleUpdate = () => {
@@ -537,7 +538,7 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 		scroller?.removeEventListener("scroll", scheduleUpdate);
 		window.removeEventListener("resize", scheduleUpdate);
 		scroller = null;
-		icon.style.transform = "";
+		icon.setCssStyles({ transform: "" });
 	};
 
 	row.addEventListener("mouseenter", start);
@@ -743,9 +744,8 @@ function createMessageActionsMenu({
 				textarea.className = "msg-inline-editor";
 				textarea.value = msg.content;
 
-				// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-				textarea.style.height = "auto";
-				textarea.style.height = textarea.scrollHeight + "px";
+				textarea.setCssStyles({ height: "auto" });
+				textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
 
 				const saveBtn = document.createElement("button");
 				saveBtn.textContent = "Save";
@@ -784,9 +784,8 @@ function createMessageActionsMenu({
 
 				/* Auto resize the editor depending of the amount of content*/
 				const autoResize = () => {
-					// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-					textarea.style.height = "auto";
-					textarea.style.height = textarea.scrollHeight + "px";
+					textarea.setCssStyles({ height: "auto" });
+					textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
 				};
 				textarea.addEventListener("input", autoResize);
 				autoResize();
@@ -818,13 +817,16 @@ function createMessageActionsMenu({
 						// instant UI update
 						content.empty();
 
+						// bound to this block, not to the plugin - see the processor in main.ts
+						const renderChild = new MarkdownRenderChild(content);
+						ctx.addChild(renderChild);
+
 						await MarkdownRenderer.render(
 							app,
 							newContent,
 							content,
 							filePath,
-							// eslint-disable-next-line obsidianmd/no-plugin-as-component
-							plugin
+							renderChild
 						);
 
 						// clear the active editor

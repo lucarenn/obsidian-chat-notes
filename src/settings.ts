@@ -146,7 +146,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Enable button shadow")
-		.setDesc("Toggle shadow on message action buttons. Override per file with 'msgButtonShadow: true' or 'msgButtonShadow: false'.")
+		.setDesc("Toggle shadow on message action buttons; override per file with 'msgButtonShadow: true' or 'msgButtonShadow: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.enableButtonShadow)
@@ -158,7 +158,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Show message author")
-		.setDesc("Show the author name in the header of every message. Override per file with 'msgShowAuthor: true' or 'msgShowAuthor: false'.")
+		.setDesc("Show the author name in the header of every message; override per file with 'msgShowAuthor: true' or 'msgShowAuthor: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.showMessageAuthor)
@@ -170,7 +170,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Show message time")
-		.setDesc("Show the timestamp in the header of every message. Override per file with 'msgShowTime: true' or 'msgShowTime: false'.")
+		.setDesc("Show the timestamp in the header of every message; override per file with 'msgShowTime: true' or 'msgShowTime: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.showMessageTimestamp)
@@ -182,7 +182,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Show author badges")
-		.setDesc("Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else. Widens the gutter slightly while on. Override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.")
+		.setDesc("Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else; widens the gutter slightly while on; override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.showAuthorBadges)
@@ -194,7 +194,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Message corner radius")
-		.setDesc("Determines how round corners of the message bubbles are. Override per file with 'msgCornerRadius: 20'.")
+		.setDesc("Determines how round corners of the message bubbles are; override per file with 'msgCornerRadius: 20'.")
 		.addSlider(slider => {
 			slider
 				.setLimits(CORNER_RADIUS_MIN, CORNER_RADIUS_MAX, 1) 	// step 1px
@@ -207,7 +207,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Default message author")
-		.setDesc("Which author a new message is sent as when its author field is left empty. Override per file with 'msgDefaultAuthor: owner' or 'msgDefaultAuthor: previous'; the chat owner itself is the file's 'author' YAML key.")
+		.setDesc("Which author a new message is sent as when its author field is left empty; override per file with 'msgDefaultAuthor: owner' or 'msgDefaultAuthor: previous'; the chat owner itself is the file's 'author' YAML key.")
 		.addDropdown(dropdown => {
 			dropdown
 				.addOption("owner", "Chat owner")
@@ -221,7 +221,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Scroll to bottom on send")
-		.setDesc("Jump to the end of the chat every time a message is sent. Override per file with 'msgScrollOnSend: true' or 'msgScrollOnSend: false'.")
+		.setDesc("Jump to the end of the chat every time a message is sent; override per file with 'msgScrollOnSend: true' or 'msgScrollOnSend: false'.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.scrollOnSend)
@@ -233,7 +233,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 		.setName("Show ribbon icon")
-		.setDesc("Show a 'Create new chat note' button in the left ribbon. The command itself stays available from the command palette either way, and can be given a hotkey there.")
+		.setDesc("Show a button in the left ribbon for creating a new chat note; the command itself stays available from the command palette either way, and can be given a hotkey there.")
 		.addToggle(toggle => {
 			toggle
 				.setValue(this.plugin.settings.showRibbonIcon)
@@ -294,6 +294,16 @@ function parsePixelOverride(value: unknown, min: number, max: number): number | 
 	return Math.min(Math.max(parsed, min), max);
 }
 
+/* and for text. Frontmatter values are `any`, so this is also what keeps a YAML number or
+   list from reaching a field typed as a colour or a name. An empty string resolves to
+   undefined rather than to "", so it falls through to the global setting instead of blanking
+   it. */
+function parseStringOverride(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed === "" ? undefined : trimmed;
+}
+
 export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = cache?.frontmatter;
@@ -301,20 +311,21 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	if (!fm) return {};
 
 	// only a recognised mode counts as an override; a typo falls through to the global one
+	const authorMode = parseStringOverride(fm.msgDefaultAuthor);
 	const defaultAuthorMode: DefaultAuthorMode | undefined =
-		fm.msgDefaultAuthor === "owner" || fm.msgDefaultAuthor === "previous"
-			? fm.msgDefaultAuthor
+		authorMode === "owner" || authorMode === "previous"
+			? authorMode
 			: undefined;
 
 	// set variable alias names for the yaml overrides here:
 	return {
-		author: fm.author,			// the chat owner - yaml only, never a global setting
+		author: parseStringOverride(fm.author),		// the chat owner - yaml only, never a global setting
 		defaultAuthorMode,
-		messageBgColor: fm.msgColor,
-		messageHighlightColor: fm.msgPinColor,
-		messageFlashColor: fm. msgFlashColor,
-		messageReplyColor: fm.msgReplyColor,
-		messageBorderColor: fm.msgBorderColor,
+		messageBgColor: parseStringOverride(fm.msgColor),
+		messageHighlightColor: parseStringOverride(fm.msgPinColor),
+		messageFlashColor: parseStringOverride(fm.msgFlashColor),
+		messageReplyColor: parseStringOverride(fm.msgReplyColor),
+		messageBorderColor: parseStringOverride(fm.msgBorderColor),
 		messageCornerRadius: parsePixelOverride(fm.msgCornerRadius, CORNER_RADIUS_MIN, CORNER_RADIUS_MAX),
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
 		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
