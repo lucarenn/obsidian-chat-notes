@@ -379,14 +379,16 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	/* Create message header and add menu buttons to header */
 	const header = createMessageHeader(`${author_text}`, `${msg.header.timestamp}`,  menu);
 
-	/* Seamless banner shown when this message is a reply to another one */
+	/* Seamless banner shown when this message is a reply to another one. The target is resolved
+	   here, at render, against the current model - nothing indexes replies and a delete carries
+	   no bookkeeping. An unresolved one still gets a banner (see createReplyBanner). */
 	const replyTargetId = msg.header.extra.reply_to;
 	if (replyTargetId) {
-		const replyTargetEntry = context.messageMap.get(replyTargetId);
-		if (replyTargetEntry) {
-			const banner = createReplyBanner(replyTargetEntry, () => onScrollToReply(replyTargetId));
-			wrapper.append(banner);
-		}
+		const banner = createReplyBanner(
+			context.messageMap.get(replyTargetId),
+			() => onScrollToReply(replyTargetId)
+		);
+		wrapper.append(banner);
 	}
 
 	wrapper.append(header, content);
@@ -563,12 +565,13 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 	ctx.addChild(child);
 }
 
-function createReplyBanner(targetEntry: MessageEntry, onScroll: () => void): HTMLDivElement {
+/* An undefined target means the message replied to isn't in the file - deleted, or a reply_to
+   that never resolved. That renders as an inert banner rather than no banner: the reply_to is
+   still in the file, so dropping it silently loses the relationship. */
+function createReplyBanner(targetEntry: MessageEntry | undefined, onScroll: () => void): HTMLDivElement {
 
 	const banner = document.createElement("div");
 	banner.className = "msg-reply-banner";
-	banner.setAttribute("role", "button");
-	banner.tabIndex = 0;
 
 	const icon = document.createElement("span");
 	icon.className = "msg-reply-banner-icon";
@@ -577,11 +580,23 @@ function createReplyBanner(targetEntry: MessageEntry, onScroll: () => void): HTM
 	const text = document.createElement("span");
 	text.className = "msg-reply-banner-text";
 
+	banner.append(icon, text);
+
+	if (!targetEntry) {
+		banner.classList.add("is-missing");
+		text.textContent = "Message not found";
+
+		// no role, tabIndex or listeners: there is nothing to scroll to, so it must not read
+		// as a button to a pointer, to the keyboard, or to a screen reader
+		return banner;
+	}
+
 	const author = targetEntry.message.header.author || "Unknown";
 	const preview = targetEntry.message.content.trim().replace(/\s+/g, " ").slice(0, 80);
 	text.textContent = preview ? `${author}: ${preview}` : author;
 
-	banner.append(icon, text);
+	banner.setAttribute("role", "button");
+	banner.tabIndex = 0;
 
 	const scroll = (e: Event) => {
 		e.stopPropagation();
@@ -700,7 +715,15 @@ function createMessageActionsMenu({
 						() => null
 					);
 
-					if (removed) new Notice("Deleted message");
+					if (removed) {
+						// a reply pending on the message that just went away would be written
+						// into the next sent message as a reply_to pointing at nothing
+						if (plugin.getChatNote(file).replyTo === msg.header.id) {
+							await plugin.handleCancelReply(file);
+						}
+
+						new Notice("Deleted message");
+					}
 
 				})();
 			}).open();

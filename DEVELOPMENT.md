@@ -131,6 +131,34 @@ lands in two places:
 Only a YAML value that actually parses counts as an override; a typo or an empty key falls
 through to the global setting rather than silently meaning `false`/`0`.
 
+**`onYAMLChange` is a guard, not an event.** There is no frontmatter-only event: the API offers
+`metadataCache.on("changed")`, which fires for every markdown file in the vault on every content
+change, message edits included (`vault.on("modify")` is strictly worse — same frequency, no
+parsed frontmatter). So the handler's first job is establishing that the *YAML* changed;
+everything past that point is the response to a config or chat-status change and must not run
+for a message edit. The comparison is by value, since each parse yields a fresh object, and
+against `yamlCache` — seeded in **`updateFileConfig`** next to the config it resolved, so it
+reads as "does the YAML still match the one the cached config was built from". Seeding it only
+inside `onYAMLChange` left it `undefined` until the first change, so the first save of a session
+re-applied the whole config. Two edges it has to get right: a file that *lost* its frontmatter
+still has to pass (that is how a chat note ends — only missing on both sides stops), and an
+unrecorded `isChatNote` counts as `false`, since `false !== undefined` read "still not a chat
+note" as a status change and rebuilt the view of any ordinary note whose properties were edited.
+
+**A container is per *view*, not per file, so config is applied at the switch.** `applyStyles`
+writes to the view container, which a tab reuses when it navigates to another file — it arrives
+still carrying the previous file's `--settings-msg-*` values, and nothing about rendering clears
+them. `onFileSwitch` therefore applies the config itself. Leaving that to the first message to
+render was wrong twice over: the render-time gate (`lastAppliedConfig !== configCache`) is an
+identity check on the *file's* config, so returning to a file whose config hadn't changed since
+it was last applied skipped it, and a back/forward that re-inserts an already rendered view runs
+no processor at all. Either way the container kept the other file's colours.
+
+The gate stays as the fallback for a container that mounts without a switch. Two things it
+implies: a resolved config must not be memoized into a stable object (the identity *is* the
+signal), and anything that calls `updateFileConfig` and then applies the config itself should set
+`lastAppliedConfig`, or the next render repeats the work.
+
 ## Quirks and tricks
 
 **Two view modes.** Reading View has a flat DOM; Live Preview mounts each
@@ -241,6 +269,16 @@ This knowingly breaks `obsidianmd/no-forbidden-elements` (disabled inline, with 
 at the call site). That rule targets plugins shipping styling from JS; the alternative here
 would be re-asserting a class from a MutationObserver, at the cost of a document-wide query
 on every frame the DOM churns.
+
+**Replies resolve forward-only, at render.** A reply stores its target's id; the target stores
+nothing. Nothing indexes replies and deleting a message carries no bookkeeping — each banner
+resolves its own target through the `messageMap` lookup it already does, against a model
+`withMessageBlock` refreshed before the write. A target that doesn't resolve renders as an
+inert "Message not found" banner rather than as no banner: `reply_to` is still in the file, so
+dropping it silently loses the relationship. Being a render-time decision, it is also correct
+for a Live Preview cached re-insert. The Notice from `scrollToMessage` covers exactly the gap
+that leaves: a row rendered *before* the delete still carries a live-looking banner, and
+clicking it has to say why nothing happened.
 
 **Text contrast is computed.** The bubble colour is arbitrary user input, so
 `getReadableTextColor` picks black or white and exposes it as `--settings-msg-text-color`,

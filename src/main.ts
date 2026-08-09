@@ -156,19 +156,33 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		});
 
-		// on FILE SWITCH: move/restore the chat input
-		this.registerEvent(
-				this.app.workspace.on("active-leaf-change", async (leaf) => {
-					if (!leaf) return;
-					const view = leaf.view;
-					if (!(view instanceof MarkdownView)) return;
-					const file = view?.file;
-					if (!file) return;
+		/* on FILE SWITCH: move the chat input to the view showing the file, and swap the draft
+		   it holds for that file's own.
 
-					this.updateFileConfig(file);
-					await this.onFileSwitch(file, view);
-				})
-		  );
+		   Two events, because neither covers the other. "active-leaf-change" fires when the
+		   focused tab or pane changes - including to another leaf showing the SAME file, which
+		   the single input element still has to move to. "file-open" fires when the file inside
+		   a leaf changes: opening a note in the current tab keeps the leaf, so nothing else
+		   announces it, and the input would go on showing the previous file's draft while
+		   caching keystrokes against it. It also covers the file already open when the plugin
+		   loads, which no leaf change announces.
+
+		   Both firing for one switch (a tab change that is also a file change) is harmless -
+		   every step of onFileSwitch is idempotent, and the second pass restores the draft it
+		   just saved. */
+		const handleFileSwitch = () => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file;
+			if (!view || !file) return;
+
+			this.updateFileConfig(file);
+			void this.onFileSwitch(file, view).catch(err => {
+				console.error("Failed to switch chat file", err);
+			});
+		};
+
+		this.registerEvent(this.app.workspace.on("active-leaf-change", handleFileSwitch));
+		this.registerEvent(this.app.workspace.on("file-open", handleFileSwitch));
 
 		// workspace "resize" rather than window "resize": it also fires for sidebar and
 		// split changes, which resize the pane without resizing the window
@@ -236,7 +250,6 @@ export default class ChatNotesPlugin extends Plugin {
 
 				// Only render if the file has type: chat in yaml properties
 				if (!this.getIsChatNote(file)) {
-					// TODO remove render completely and display default code block
 					renderFallbackBlock(el, source);
 					return;
 				}
@@ -324,13 +337,12 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		);
 
-		// create input field
-		this.app.workspace.onLayoutReady(() => {
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (view) {
-			  	this.updateChatInputPosition(view);
-			}
-		  });
+		/* create the input for the file already open at load. Whether that file's own file-open
+		   landed before the listener above existed is a race, so this runs the switch by hand:
+		   without it currentFile stays null, and both save paths are gated on it - keystrokes
+		   on the first note of a session were cached nowhere. Positioning follows from the
+		   ResizeObserver onFileSwitch installs, as it does for every other switch. */
+		this.app.workspace.onLayoutReady(handleFileSwitch);
 	}
 
 	onunload() {
@@ -347,7 +359,7 @@ export default class ChatNotesPlugin extends Plugin {
 		const input = this.getChatInput();
 
 		// Save old file input
-		if (this.currentFile && this.chatInputEl) {
+		if (this.currentFile) {
 			this.getChatNote(this.currentFile).inputCache = this.getInputValue();
 		}
 
@@ -367,10 +379,21 @@ export default class ChatNotesPlugin extends Plugin {
 		this.setInputValue(saved);
 		void this.updateReplyBanner();
 
-		/* A leaf showing this file for the first time has a container without the filter
-		   class. contentEl survives a reading <-> live preview switch, so this only has to
-		   happen when the view starts showing the file, not on every mode change. */
-		this.applyPinFilter(newFile);
+		/* A view container is REUSED when its tab navigates to another file, and it goes on
+		   carrying the previous file's --settings-msg-* properties and classes. Applied here,
+		   at the switch, rather than left to the first message that renders: that gate is an
+		   identity check on the FILE's config, so coming back to a file whose config hasn't
+		   changed since it was last applied skips it - and a back/forward that re-inserts an
+		   already rendered view runs no processor at all. Either way the container kept the
+		   other file's colours.
+
+		   Also covers the pinned-only filter, which applyConfigToFile re-asserts. */
+		await this.applyConfigToFile(newFile);
+
+		// the container now matches this file's config, so the first message to render would
+		// otherwise apply the identical thing again
+		const note = this.getChatNote(newFile);
+		note.lastAppliedConfig = note.configCache;
 
 		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
@@ -379,11 +402,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 		input.style.display = "flex";
+		// contentEl, not a mode-specific element: it survives a reading <-> live preview switch,
+		// and the part that does depend on mode is picked in updateChatInputPosition
 		if (input.parentElement !== view.contentEl) {
-			// TODO check where to attach input field, depending on mode or calculate updates
-			if (view.getMode() === "preview") {}
 			view.contentEl.appendChild(input);
-
 		}
 
 		// Watch for iternal widow resizes (and update chat input field position)
@@ -391,37 +413,43 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
+	// the metadata event fires on every content change of every file, so the guard below is
+	// what makes this the frontmatter handler (see DEVELOPMENT.md)
 	async onYAMLChange(file: TFile){
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const newFrontmatter = cache?.frontmatter;
-		const oldFrontmatter = this.getChatNote(file).yamlCache;
+		const note = this.getChatNote(file);
+		const oldFrontmatter = note.yamlCache;
 
-		// check if YAML was actually changed (event is also triggered by file writes)
+		// by value, since every parse yields a fresh object. Missing on both sides stops here
+		// too; a file that just lost its frontmatter must not, that's how a chat note ends
 		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return;
-		if (!newFrontmatter) return; // YAML was removed?
-		if (!(file instanceof TFile)) return;
-		this.getChatNote(file).yamlCache = newFrontmatter;
 
 		console.log("metadata change")
 
-		// safe new config metadata changes to cache
+		// safe new config metadata changes to cache (this re-seeds yamlCache with the above)
 		this.updateFileConfig(file);
 
-		const previousStatus = this.getChatNote(file).isChatNote;
+		// `?? false`: an unrendered file has no recorded status, and `false !== undefined`
+		// would count "still not a chat note" as a change
+		const previousStatus = note.isChatNote ?? false;
 		const currentStatus = isChatFile(this.app, file);
-		this.getChatNote(file).isChatNote = currentStatus;
+		note.isChatNote = currentStatus;
 
 		if (currentStatus && (currentStatus === previousStatus)) {
 			// chat file YAML was changed -> apply styles AND the non-style settings
 			await this.applyConfigToFile(file);
+
+			// updateFileConfig replaced the config object, and the processor's guard is an
+			// identity check - without this the next render applies the same config again
+			note.lastAppliedConfig = note.configCache;
 
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
 
 			setTimeout(() => {
 				// delay until UI + markdown settle
-				console.log("FULL RERENDER")
 				void this.refreshFile(file);
 
 				// the rerender triggers onFileSwitch, which repositions the input already
@@ -883,7 +911,17 @@ export default class ChatNotesPlugin extends Plugin {
 		   it through the codeblock processor - then wait for the row to appear. */
 		if (!row) {
 			const entry = context.messageMap.get(msgId);
-			if (!entry) return false;
+
+			/* Reported here rather than at the callsite, because this is the only place the
+			   reason is known: the other failure below (no row after waiting) means the message
+			   exists but couldn't be mounted, and must stay silent instead of claiming it was
+			   deleted. Reaches the reply banners of rows that predate the delete - once such a
+			   row re-renders it becomes the inert "Message not found" variant and can't be
+			   clicked at all. */
+			if (!entry) {
+				new Notice("That message is no longer in the file");
+				return false;
+			}
 
 			const view = this.app.workspace.getLeavesOfType("markdown")
 				.map(leaf => leaf.view)
@@ -996,7 +1034,14 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!(file instanceof TFile)) return;
 		const overrides = getFileOverrides(this.app, file);
 		const resolved = resolveConfig(this.settings, overrides);
-		this.getChatNote(file).configCache = resolved;
+
+		const note = this.getChatNote(file);
+		note.configCache = resolved;
+
+		// the frontmatter this config was resolved FROM, so onYAMLChange can tell whether a
+		// metadata change touched the YAML at all. Seeded here so the two can never disagree
+		note.yamlCache = this.app.metadataCache.getFileCache(file)?.frontmatter;
+
 		return resolved;
 	}
 
@@ -1183,22 +1228,24 @@ export default class ChatNotesPlugin extends Plugin {
 		return this.chatInputEl;
 	}
 
+	/* The message textarea itself, never a query for it: the container also holds the author
+	   and timestamp override fields, and those come first in the DOM. A selector list matches
+	   in document order regardless of how it is written, so "textarea, input" resolved to the
+	   author field - drafts were saved and restored there, and the real draft was never
+	   touched (it looked like one draft shared by every file).
+
+	   Both tolerate the input not existing yet: getChatInput builds it lazily, and
+	   onFileSwitch is only the first caller by convention, not by construction. */
 	getInputValue(): string {
-		//TODO return if not initialized?
-		const input = this.chatInputEl.querySelector("textarea, input");
-		return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
-			? input.value
-			: "";
+		return this.chatTextareaEl?.value ?? "";
 	}
 
 	setInputValue(value: string) {
-		//TODO lazy initialize? -> need to get view
-		const input = this.chatInputEl.querySelector("textarea, input");
-		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
-			input.value = value;
-			// resize the textarea to fit the restored content
-			input.dispatchEvent(new Event("input"));
-		}
+		if (!this.chatTextareaEl) return;
+
+		this.chatTextareaEl.value = value;
+		// resize the textarea to fit the restored content
+		this.chatTextareaEl.dispatchEvent(new Event("input"));
 	}
 
     getChatNote(file: TFile): ChatNote {

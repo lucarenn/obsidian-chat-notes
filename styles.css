@@ -51,7 +51,11 @@
     /* box-shadow, not border: overflow:hidden clips this element's children but never its
        own border, so a real border would stay visible as a ring behind the reply banner */
     box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #808080) !important;
-    will-change: transform;
+
+    /* no will-change here: it makes every bubble its own layer, which Canvas then scales
+       instead of re-rasterizing (blurry text). If .bump is ever used, set it from JS around
+       the animation */
+
     /* clips the reply banner's square top corners to this exact silhouette, at any radius */
     overflow: hidden;
 }
@@ -720,6 +724,16 @@ padding-bottom: 80px;
 
 .msg-reply-banner:hover {
     opacity: 1;
+}
+
+/* the message replied to is not in the file - keeps the bubble's reply colour so it still reads
+   as part of the message, and only the text reads as inactive. :hover has to be neutralised
+   here too, since it raises the opacity this is lowering */
+.msg-reply-banner.is-missing,
+.msg-reply-banner.is-missing:hover {
+    cursor: default;
+    opacity: 0.55;
+    font-style: italic;
 }
 
 .msg-reply-banner-icon {
