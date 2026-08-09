@@ -1,5 +1,5 @@
 {
-	"name": "obsidian-chat-plugin",
+	"name": "chat-notes",
 	"version": "1.0.0",
 	"description": "Obsidian chat plugin.",
 	"main": "main.js",

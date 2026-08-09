@@ -17,7 +17,7 @@ npm run lint
 Shipped artifacts are `main.js`, `manifest.json` and `styles.css` — nothing else is read at
 runtime. Reload the plugin (or the vault) to pick up a build.
 
-Working directly in a test vault's `.obsidian/plugins/obsidian-chat-plugin` is the shortest
+Working directly in a test vault's `.obsidian/plugins/chat-notes` is the shortest
 loop: `npm run dev` then writes `main.js` straight to where Obsidian loads it, with no copy
 step in between.
 
