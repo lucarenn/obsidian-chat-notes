@@ -12,13 +12,13 @@ Chat Notes is not in the community plugin store yet — it is awaiting review. U
 
 **Manually**
 
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/lucarenn/obsidian-chat-plugin/releases/latest).
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/lucarenn/obsidian-chat-notes/releases/latest).
 2. In your vault, create the folder `.obsidian/plugins/chat-notes/` and put the three files in it.
 3. Reload Obsidian and enable **Chat Notes** under **Settings → Community plugins**.
 
 **With [BRAT](https://github.com/TfTHacker/obsidian42-brat)**
 
-Add `lucarenn/obsidian-chat-plugin` as a beta plugin. BRAT installs it and keeps it up to date.
+Add `lucarenn/obsidian-chat-notes` as a beta plugin. BRAT installs it and keeps it up to date.
 
 # Usage
 
