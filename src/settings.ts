@@ -20,7 +20,6 @@ export interface ChatConfig {
 	showAuthorBadges?: boolean;
 	scrollOnSend?: boolean;
     messageCornerRadius?: number;
-	chatId?: string;
 	author?: string;
 	messageHighlightColor?: string;
 	messageFlashColor?: string;
@@ -309,7 +308,6 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 
 	// set variable alias names for the yaml overrides here:
 	return {
-		chatId: fm.chatId,
 		author: fm.author,			// the chat owner - yaml only, never a global setting
 		defaultAuthorMode,
 		messageBgColor: fm.msgColor,

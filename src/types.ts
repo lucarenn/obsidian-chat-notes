@@ -251,10 +251,6 @@ export class ChatNote {
 		public yamlCache?: FrontMatterCache,
 		public lastAppliedConfig?: ChatConfig,
 
-		public lastId?: number,
-		public lastAuthor?: string,
-		public chatAuthor?: string,
-
 		public replyTo?: string,	// id of the message the next sent message will reply to
 		public pinFilter?: boolean,	// showing pinned messages only
 

@@ -93,7 +93,6 @@ A few things to know:
 | `msgButtonShadow` | `true` / `false` | Enable button shadow |
 | `msgScrollOnSend` | `true` / `false` | Scroll to bottom on send |
 | `msgDefaultAuthor` | `owner` / `previous` | Default message author |
-| `chatId` | text | *(reserved - read but not currently used)* |
 
 Out-of-range numbers are clamped rather than ignored: `msgCornerRadius: 999` gives 50.
 

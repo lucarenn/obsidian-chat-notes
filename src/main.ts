@@ -355,7 +355,6 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async onFileSwitch(newFile: TFile, view: MarkdownView) {
 
-		console.log("FILE SWITCH ")
 		const input = this.getChatInput();
 
 		// Save old file input
@@ -425,8 +424,6 @@ export default class ChatNotesPlugin extends Plugin {
 		// by value, since every parse yields a fresh object. Missing on both sides stops here
 		// too; a file that just lost its frontmatter must not, that's how a chat note ends
 		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return;
-
-		console.log("metadata change")
 
 		// safe new config metadata changes to cache (this re-seeds yamlCache with the above)
 		this.updateFileConfig(file);
@@ -1186,7 +1183,6 @@ export default class ChatNotesPlugin extends Plugin {
 		// push the file's current config to its archive context (non-CSS settings) and to
 		// every html container it's open in (the CSS variables)
 
-		console.log("applying config to file")
 		const config = this.getConfigCache(file);
 		const context = await this.getArchiveContext(file);
 
@@ -1323,7 +1319,6 @@ export default class ChatNotesPlugin extends Plugin {
 		let contextPromise = this.archiveContexts.get(file.path);
 		if (!contextPromise) {
 			// lazy init -> scan the whole file and establish context
-			console.log("generating context:", file.path);
 			contextPromise = this.createArchiveContext(file);
 			this.archiveContexts.set(
 				file.path,

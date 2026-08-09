@@ -320,21 +320,6 @@ export function addPinButton(view: MarkdownView, onPress: ()=>void) {
 
 }
 
-export function addScrollMsgButton(view: MarkdownView,
-	file: TFile,
-	msgId: string,
-	onScroll: (file: TFile, id:  string)=>void) {
-
-	if (!view) return;
-	if ((view as any)._msgScrollButtonAdded) return;
-	(view as any)._msgScrollButtonAdded = true;
-
-	view.addAction("pin", "Scroll to Message: " + msgId,  (evt) => {
-		onScroll(file, msgId);
-	});
-
-}
-
 /**
 Create HTML elements for messages
 */
@@ -667,6 +652,13 @@ function createMessageActionsMenu({
 	menu.append(buttonContainer, menuBtn)
 
     /* ---------------- COPY ---------------- */
+
+	/* Outside the handler, so a second copy actually cancels the first button's pending
+	   reset. This used to clear Number(msg.header.id) - a message id, not a timer handle,
+	   and small ids collide with the small sequential integers the browser hands out, so it
+	   could cancel an unrelated timer belonging to Obsidian or another plugin. */
+	let resetTimer: number | undefined;
+
     copyBtn.addEventListener("click", () => {
 		void (async () => {
 			await navigator.clipboard.writeText(msg.content);
@@ -677,7 +669,6 @@ function createMessageActionsMenu({
 				copyBtn.classList.remove("fade");
 			}, 150);
 
-			let resetTimer = Number(msg.header.id);
 			clearTimeout(resetTimer);
 
 			resetTimer = window.setTimeout(() => {

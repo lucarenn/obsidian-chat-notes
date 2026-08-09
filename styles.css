@@ -53,8 +53,8 @@
     box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #808080) !important;
 
     /* no will-change here: it makes every bubble its own layer, which Canvas then scales
-       instead of re-rasterizing (blurry text). If .bump is ever used, set it from JS around
-       the animation */
+       instead of re-rasterizing (blurry text). To animate a bubble, set it from JS around the
+       animation and drop it again afterwards */
 
     /* clips the reply banner's square top corners to this exact silhouette, at any radius */
     overflow: hidden;
@@ -73,16 +73,6 @@
 .chat-message-row > .chat-message {
     outline: var(--msg-reply-outline, none);
     outline-offset: 2px;
-}
-
-.chat-message.bump {
-    animation: bump 180ms ease;
-}
-
-@keyframes bump {
-    0%   { transform: scale(1); }
-    40%  { transform: scale(1.03); }
-    100% { transform: scale(1); }
 }
 
 /* Pinned-only filter: one class on the container, plus the data-pinned flag every row
