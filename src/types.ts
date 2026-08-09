@@ -1,31 +1,36 @@
 import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig, DefaultAuthorMode } from "./settings";
-import { isNumericId, compareNumericIds, incrementNumericId, getReadableTextColor } from "./util";
+import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
 import ChatNotesPlugin from "./main"
 
 
+/* A parsed chat file: everything derivable from its text, and nothing else.
+
+   Deliberately holds no DOM references and no UI state. It is disposable - dropped whenever
+   the file changes and rebuilt lazily on the next render (see invalidateArchiveContext in
+   main.ts) - so anything that must outlive a file edit belongs on ChatNote instead, and
+   anything that describes the rendered page is found by querying the DOM.
+
+   Nothing mutates a context after construction except applyConfigToContext. That invariant
+   is what makes "throw it away and reparse" safe: a caller holding an older context across
+   an await sees a consistent snapshot rather than a half-updated one. */
 export class ArchiveContext {
     file: TFile;
 	messageMap: Map<string, MessageEntry>
-    renderedElements: Map<string, HTMLElement>;
-	pinnedMessagesAmount: number;
-	filterPinnedOnly: boolean;
 
-	// derived from the messages, rebuilt by refreshMessageIndex
+	// all derived from the messages, rebuilt together by refreshMessageIndex
 	authors: Set<string> = new Set();
 	lastAuthor?: string;
 	maxMessageId = "0";
+	pinnedMessagesAmount = 0;
 
 	// mirrored from the resolved config, refreshed by applyConfigToContext
 	chatAuthor?: string;
 	defaultAuthorMode: DefaultAuthorMode = "owner";
 
-    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>, pinnedMessages?: number) {
+    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>) {
         this.file = file;
         this.messageMap = msgEntryMap;
-		this.renderedElements = new Map();
-		this.pinnedMessagesAmount = pinnedMessages ?? 0;
-		this.filterPinnedOnly = false;
 		this.refreshMessageIndex();
     }
 
@@ -34,6 +39,7 @@ export class ArchiveContext {
 		const authors = new Set<string>();
 		let lastAuthor: string | undefined;
 		let maxMessageId = "0";
+		let pinned = 0;
 
 		for (const entry of this.messageMap.values()) {
 			const author = entry.message.header.author.trim();
@@ -47,11 +53,16 @@ export class ArchiveContext {
 			if (isNumericId(id) && compareNumericIds(id, maxMessageId) > 0) {
 				maxMessageId = id;
 			}
+
+			if (entry.message.header.extra.pinned === "true") pinned += 1;
 		}
 
 		this.authors = authors;
 		this.lastAuthor = lastAuthor;
 		this.maxMessageId = maxMessageId;
+		// counted, never incremented by hand - a running total was a second thing to keep
+		// in step with the file, and it drifted whenever a message was registered twice
+		this.pinnedMessagesAmount = pinned;
 	}
 
 	nextMessageId(): string {
@@ -73,108 +84,31 @@ export class ArchiveContext {
 		return this.chatAuthor ?? this.lastAuthor ?? "";
 	}
 
-	// registers an appended message without a full reparse; `element` is filled in by the
-	// codeblock processor when it renders the new block
+	/* Registers a message the parse hasn't seen yet (one just appended, or one the codeblock
+	   processor met before the reparse landed) so author/next-id lookups include it right
+	   away. Idempotent: the same block renders once per open container, and each render
+	   would otherwise re-register it. */
 	addMessage(entry: MessageEntry) {
+		if (this.messageMap.has(entry.id)) return;
+
 		this.messageMap.set(entry.id, entry);
-
-		if (entry.message.header.extra.pinned === "true") {
-			this.pinnedMessagesAmount += 1;
-		}
-
 		this.refreshMessageIndex();
 	}
 
-	getEntry(id: string): MessageEntry {
-        const entry = this.messageMap.get(id);
-        if (!entry) throw new Error(`Message Entry  ${id} not found.`);
-        return entry;
-    }
-
-	refreshStylesPerMessage(config: ChatConfig) {
-
-		for (const entry of this.messageMap.values()) {
-
-			if (!entry.element)
-				continue;
-
-			// set on the row, not the bubble: badge and tail are siblings of the bubble
-			const row = entry.element.parentElement ?? entry.element;
-
-			row.classList.toggle("is-owner", this.isOwnerMessage(entry.message));
-
-			const pinned =
-				entry.message.header.extra.pinned === "true";
-
-			const color = pinned
-				? config.messageHighlightColor
-				: config.messageBgColor;
-
-			// `continue`, not `return` - one colourless message must not abandon the loop
-			if (!color) continue;
-
-			row.style.setProperty(
-				"--settings-msg-bg-color",
-				color
-			);
-			row.style.setProperty(
-				"--settings-msg-text-color",
-				getReadableTextColor(color)
-			);
-		}
-	}
-
-	updateVisibility() {
-		// FLIP animation: measure, toggle, then slide the surviving rows into place
-		const initialPositions = new Map<HTMLElement, number>();
-		for (const entry of this.messageMap.values()) {
-			if (entry.element) {
-				initialPositions.set(entry.element, entry.element.getBoundingClientRect().top);
-			}
-		}
-
-		this.filterPinnedOnly = !this.filterPinnedOnly;
-
-		for (const entry of this.messageMap.values()) {
-			if (!entry.element) continue;
-
-			const isPinned = entry.message.header.extra.pinned === "true";
-
-			const shouldHide = this.filterPinnedOnly && !isPinned;
-			entry.element.classList.toggle("hidden-by-pin-filter", shouldHide);
-		}
-
-		for (const entry of this.messageMap.values()) {
-			const el = entry.element;
-			if (!el || el.classList.contains("hidden-by-pin-filter")) continue;
-
-			const firstTop = initialPositions.get(el);
-			if (firstTop === undefined) continue;
-
-			const lastTop = el.getBoundingClientRect().top;
-			const deltaY = firstTop - lastTop;
-
-			if (deltaY !== 0) {
-				el.style.transform = `translateY(${deltaY}px)`;
-				el.style.transition = "transform 0s";
-				el.offsetHeight;	// forced reflow, so the transition below actually runs
-				el.style.transition = "transform 180ms cubic-bezier(0.34, 1.35, 0.64, 1)";
-				el.style.transform = "";
-
-				el.addEventListener("transitionend", () => {
-					el.style.transition = "";
-				}, { once: true });
-			}
-		}
-	}
 }
 
 export interface MessageEntry {
 	id: string;
 	message: Message;
+
+	/* Where the block sat in the text this entry was parsed from. A scroll hint only - use
+	   it to jump an unrendered message into view, NEVER to write to the file. Any edit
+	   anywhere above a message shifts it, and the context can lag the file by one metadata
+	   debounce, so a write keyed off these numbers can land in a different message's header.
+	   Writes locate the block by id in the text they are about to modify (see
+	   withMessageBlock in main.ts). */
 	startLine: number;
 	endLine: number;
-	element?: HTMLElement;
 }
 
 export type CreateHTMLParams = {
@@ -183,9 +117,8 @@ export type CreateHTMLParams = {
 	msg: Message;
 	author_text: string;
 	context: ArchiveContext;
-	isReplyTarget: boolean;
 	onToggle: (menu: HTMLElement) => void;
-	onHighlight: (msgId: string, isPinned: boolean) => void;
+	onHighlight: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
 	onReplyToggle: (msgId: string) => void;
 	onScrollToReply: (targetId: string) => void;
 };
@@ -197,7 +130,7 @@ export type CreateMenuParams = {
 	wrapper: HTMLElement;
 	content: HTMLDivElement;
 	onToggle: (menu: HTMLElement) => void;
-	onHighlight: (msgId: string, isPinned: boolean) => void;
+	onHighlight: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
 };
 
 
@@ -306,6 +239,9 @@ export class Message {
 	}
 }
 
+/* Per-file UI state, held in a WeakMap keyed by TFile (see main.ts). Distinct from
+   ArchiveContext in lifetime: this is what the user did, not what the file says, so it must
+   survive a context rebuild - which now happens on every save - and a rename. */
 export class ChatNote {
 	constructor(
 		public file: TFile,
@@ -320,6 +256,7 @@ export class ChatNote {
 		public chatAuthor?: string,
 
 		public replyTo?: string,	// id of the message the next sent message will reply to
+		public pinFilter?: boolean,	// showing pinned messages only
 
 	) {}
 

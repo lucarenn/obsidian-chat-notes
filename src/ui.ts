@@ -1,6 +1,6 @@
 import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
 import { ConfirmDeleteModal } from "./modals"
-import { Message, MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
+import { MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
 import { scrollDocument, isValidTimestamp, TIMESTAMP_PLACEHOLDER } from "./util"
 import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky"
 import type ChatNotesPlugin from "./main";
@@ -213,7 +213,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		resetHeaderFields();
 
 		// a pending reply only applies to the message it was just sent with
-		void plugin.handleCancelReply();
+		void plugin.handleCancelReply(file);
 
 		if (plugin.getConfigCache(file).scrollOnSend) {
 			plugin.scrollToBottomAfterSend(file);
@@ -338,7 +338,7 @@ export function addScrollMsgButton(view: MarkdownView,
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, context, isReplyTarget, onToggle, onHighlight, onReplyToggle, onScrollToReply} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onHighlight, onReplyToggle, onScrollToReply} : CreateHTMLParams){
 
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
@@ -346,9 +346,21 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, isRe
 	const row = document.createElement("div");
 	row.className = "chat-message-row";
 
+	/* How every later operation finds this message again. Nothing holds a reference to the
+	   node: rows are unmounted and rebuilt constantly (scrolling, mode switches, re-renders)
+	   and the same message has a separate row in every container the file is open in. The
+	   source path distinguishes rows of an embedded chat note from the host's own. */
+	row.dataset.msgId = msg.header.id;
+	row.dataset.chatSrc = ctx.sourcePath;
+
+	/* Baked into the node so the pinned-only filter is pure CSS (see .msg-pinned-only).
+	   It cannot be a class toggled by a sweep: Live Preview unmounts blocks that scroll far
+	   off screen and re-inserts the cached DOM when they return without re-running this
+	   processor, so swept rows came back unfiltered and unmounted ones were never swept. */
+	row.dataset.pinned = String(msg.header.extra.pinned === "true");
+
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
-	wrapper.classList.toggle("chat-message-reply-target", isReplyTarget);
 
 	const content = document.createElement("div");
 	content.className = "message-content";
@@ -633,7 +645,7 @@ function createMessageActionsMenu({
 	setIcon(favBtn, "pin");
 	favBtn.addEventListener("click", (e) => {
 		e.stopPropagation();
-		onHighlight(msg.header.id, true);
+		onHighlight(msg.header.id);
 	});
 
 	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
@@ -676,30 +688,19 @@ function createMessageActionsMenu({
 			new ConfirmDeleteModal(app, () => {
 
 				void (async () => {
-					const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-
 					const file = app.vault.getAbstractFileByPath(filePath);
-					if (!file) return;
 					if (!(file instanceof TFile)) return;
 
-					const section = ctx.getSectionInfo(wrapper);
-					if (!section) return;
-
-					let content = await app.vault.read(file);
-					const lines = content.split("\n");
-
-					lines.splice(
-						section.lineStart,
-						section.lineEnd - section.lineStart + 1
+					// returning null removes the block. The message is located by id in the
+					// file's live text, so this can't delete a neighbour after the lines
+					// shifted - and it targets THIS message's file, not the focused one
+					const removed = await plugin.withMessageBlock(
+						file,
+						msg.header.id,
+						() => null
 					);
 
-					if (editor){
-						editor.setValue(lines.join("\n"));
-					} else {
-						await app.vault.modify(file, lines.join("\n"));
-					}
-
-					new Notice("Deleted message");
+					if (removed) new Notice("Deleted message");
 
 				})();
 			}).open();
@@ -717,37 +718,13 @@ function createMessageActionsMenu({
 					return;
 				}
 
-				const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-
 				const file = app.vault.getAbstractFileByPath(filePath);
-				if (!file) return;
 				if (!(file instanceof TFile)) return;
 
-				const section = ctx.getSectionInfo(wrapper);
-				if (!section) return;
-
-				// Get current Message
-				let fileContent = await app.vault.read(file);
-				const lines = fileContent.split("\n");
-
-				const blockLines = lines.slice(
-					section.lineStart,
-					section.lineEnd + 1
-				);
-
-				// Validate Wrapper
-				if (blockLines[0] !== "````chat-message") {
-					throw new Error("Missing opening ````chat-message");
-				}
-				if (blockLines[blockLines.length - 1] !== "````") {
-					throw new Error("Missing closing ````");
-				}
-
-				// Remove wrapper, create Message
-				const inner = blockLines.slice(1, -1).join("\n");
-				const msg = Message.fromString(inner);
-
-				// Create Editor
+				/* No file read to open the editor: the rendered message already carries its
+				   own body. The file is only touched on save, and the block is re-located by
+				   id then - so an edit made while the note shifted underneath still lands on
+				   the right message. */
 				const textarea = document.createElement("textarea");
 				textarea.className = "msg-inline-editor";
 				textarea.value = msg.content;
@@ -810,26 +787,19 @@ function createMessageActionsMenu({
 
 					void (async () => {
 						const newContent = textarea.value
-						const newMarkdown = msg.setContent(newContent).toString();
 
-						lines.splice(
-							section.lineStart,
-							section.lineEnd - section.lineStart + 1,
-							newMarkdown
+						/* The header is taken from the file's own copy of the block, not from
+						   the message this menu was built for - so a header edited elsewhere
+						   in the meantime survives the save instead of being written back
+						   stale. The trailing "" from toString()'s final newline is dropped,
+						   or every save would grow a blank line. */
+						await plugin.withMessageBlock(file, msg.header.id, ({ message }) =>
+							message
+								.setContent(newContent)
+								.toString()
+								.replace(/\n$/, "")
+								.split("\n")
 						);
-
-						if (editor){
-							// replaceRange, not setValue: rewriting the whole document also
-							// rewrites the YAML, which triggers a full rerender
-							editor.replaceRange(
-								newMarkdown,
-								{ line: section.lineStart, ch: 0 },
-								{ line: section.lineEnd +1, ch: 0 }
-							);
-
-						} else {
-							await app.vault.modify(file, lines.join("\n"));
-						}
 
 						// instant UI update
 						content.empty();

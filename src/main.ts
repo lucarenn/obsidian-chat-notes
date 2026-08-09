@@ -1,13 +1,32 @@
 import { Plugin, MarkdownRenderer, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
-import { Header, Message, ChatNote, ArchiveContext, MessageEntry } from "./types"
+import { Header, Message, ChatNote, ArchiveContext } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
-import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addScrollMsgButton } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor, formatTimestamp } from "./util"
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton } from "./ui"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows } from "./util"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
 
+// what a chat-message block renders as when it can't be shown as a message: in a note that
+// isn't a chat, or while the block is still being typed and doesn't parse yet
+function renderFallbackBlock(el: HTMLElement, source: string) {
+	const fallback = document.createElement("pre");
+	const code = document.createElement("code");
+
+	code.addClass("language-chat-message");
+	code.textContent = source;
+
+	fallback.appendChild(code);
+	el.appendChild(fallback);
+}
+
 // how long "Scroll to bottom on send" keeps re-scrolling (see scrollToBottomAfterSend)
 const SCROLL_ON_SEND_PIN_MS = 500;
+
+// escapes a value for a double-quoted CSS attribute selector - vault paths are user text and
+// may contain either of these
+function cssAttr(value: string): string {
+	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
 
 export default class ChatNotesPlugin extends Plugin {
 
@@ -24,13 +43,22 @@ export default class ChatNotesPlugin extends Plugin {
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
 
+	/* Pending reply targets, path -> message id. Mirrors each ChatNote's `replyTo`, which a
+	   WeakMap can't be enumerated for - and the stylesheet below has to be rebuilt from all
+	   of them at once. */
+	private replyTargets = new Map<string, string>();
+	private replyTargetStyleEl: HTMLStyleElement | null = null;
+
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
 	} | null = null;
 
 
-	async createArchiveContext(file: TFile): Promise<ArchiveContext> {
+	/* `source` is passed in when the caller already has the file's current text (the metadata
+	   change event hands it over), which saves a read. Otherwise cachedRead: this only parses
+	   for display, and Obsidian keeps that cache in step with the vault. */
+	async createArchiveContext(file: TFile, source?: string): Promise<ArchiveContext> {
 
 		if (!(file instanceof TFile)) {
 			throw new Error("Not a file");
@@ -39,13 +67,12 @@ export default class ChatNotesPlugin extends Plugin {
 			throw new Error("File is not a ChatNote");
 		}
 
-		const source = await this.app.vault.read(file);
-		const [messages, pinnedMessagecount] = parseMessages(source);
+		const text = source ?? await this.app.vault.cachedRead(file);
+		const [messages] = parseMessages(text);
 
 		const context = new ArchiveContext(
 			file,
-			messages,
-			pinnedMessagecount
+			messages
 		);
 
 		// the message-derived fields come from the constructor; these come from the config
@@ -119,7 +146,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.addSettingTab(new ChatNotesSettingTab(this.app, this));
 
 		// on CLICK ANYWHERE: close the open message action menu
-		document.addEventListener("click", (event) => {
+		this.registerDomEvent(document, "click", (event) => {
 			if (!this.openMenu) return;
 			const target = event.target as HTMLElement;
 
@@ -143,26 +170,57 @@ export default class ChatNotesPlugin extends Plugin {
 				})
 		  );
 
-		window.addEventListener("resize", () => {
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!view) return;
-			this.updateChatInputPosition(view);
-
-		});
-
-		// on METADATA CHANGE: reapply overridden settings, or rerender on a chat status change
+		// workspace "resize" rather than window "resize": it also fires for sidebar and
+		// split changes, which resize the pane without resizing the window
 		this.registerEvent(
-			this.app.metadataCache.on("changed", (file) => {
+			this.app.workspace.on("resize", () => this.repositionActiveChatInput())
+		);
+
+		/* The only event that fires on a reading <-> live preview switch, or when a view is
+		   rebuilt in place (e.g. by a refresh plugin). active-leaf-change doesn't fire - the
+		   leaf never changes - and the ResizeObserver watches contentEl, which keeps its size
+		   across the switch. Without this the input keeps whatever geometry it measured in
+		   the previous mode. */
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => this.repositionActiveChatInput())
+		);
+
+		/* on METADATA CHANGE: the file's text changed, so the parsed model is stale. This
+		   event carries the new content, so the rebuild costs a parse and no read. Model
+		   first, then the existing config/status handling - onYAMLChange reaches for the
+		   context and must not get the superseded one. */
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file, data) => {
+				this.invalidateArchiveContext(file, data);
+
 				void this.onYAMLChange(file).catch(err => {
 					console.error("Failed to handle YAML change", err);
 				});
 			})
 		);
 
+		// a file the plugin has no context for can't go stale, and a renamed one is looked
+		// up by its new path - so both are just a drop
 		this.registerEvent(
-			// TODO check if needed?
-			this.app.vault.on("modify", (file) => {
-			  this.updateFileConfig(file);
+			this.app.vault.on("rename", (file, oldPath) => {
+				this.archiveContexts.delete(oldPath);
+				this.archiveContexts.delete(file.path);
+
+				// the reply-target rule matches on data-chat-src, which the rows now carry
+				// under the new path - so the rule has to be re-keyed, not just dropped
+				const target = this.replyTargets.get(oldPath);
+				this.replyTargets.delete(oldPath);
+				if (target) this.replyTargets.set(file.path, target);
+				this.refreshReplyTargetStyle();
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				this.archiveContexts.delete(file.path);
+
+				this.replyTargets.delete(file.path);
+				this.refreshReplyTargetStyle();
 			})
 		);
 
@@ -179,53 +237,65 @@ export default class ChatNotesPlugin extends Plugin {
 				// Only render if the file has type: chat in yaml properties
 				if (!this.getIsChatNote(file)) {
 					// TODO remove render completely and display default code block
-
-					const fallback = document.createElement("pre");
-					const code = document.createElement("code");
-
-					code.addClass("language-chat-message");
-					code.textContent = source;
-
-					fallback.appendChild(code);
-					el.appendChild(fallback);
-
+					renderFallbackBlock(el, source);
 					return;
 				}
 
 				const context = await this.getArchiveContext(file);
-				const id = extractMessageIdFromSource(source);
-				const entry = context.messageMap.get(id);		// get the context entry for this message
-				if (!entry) throw new Error("Error, message entry not found in archiveContext");
-				const msg = entry.message
 				const note = this.getChatNote(file);
 				const config = this.getConfigCache(file);
 
+				/* The block's own text is right here, so a message the parse hasn't seen -
+				   typed by hand, pasted, or appended a moment ago - is read straight from
+				   `source` instead of forcing a reparse. Live Preview re-runs this callback
+				   on every keystroke while a block is being typed, so throwing (or
+				   rebuilding) on an unknown id fired once per character. */
+				let msg: Message;
+				try {
+					const id = extractMessageIdFromSource(source);
+					const known = context.messageMap.get(id);
+
+					if (known) {
+						msg = known.message;
+					} else {
+						msg = Message.fromString(source);
+
+						// register it so the author dropdown, next-id and reply lookups
+						// account for it before the reparse lands
+						const section = ctx.getSectionInfo(el);
+						context.addMessage({
+							id,
+							message: msg,
+							startLine: section?.lineStart ?? 0,
+							endLine: section?.lineEnd ?? 0
+						});
+					}
+				} catch (e) {
+					// a half-typed or malformed block - show it as a plain code block rather
+					// than throwing inside a render callback
+					console.warn("Could not read chat message block", e);
+					renderFallbackBlock(el, source);
+					return;
+				}
+
 				// Create HTML structure for message
-				const {wrapper, content, row} = createElementsHTML({
+				const {content, row} = createElementsHTML({
 					plugin: this,
 					ctx,
 					msg,
 					author_text: msg.header.author ?? config.author,
 					context,
-					isReplyTarget: note.replyTo === msg.header.id,
+					// every callback closes over THIS file, so a click in a background leaf
+					// acts on the message it belongs to rather than on whatever is focused
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
-					onHighlight: this.handleMessagePin.bind(this),		// callback for the highlight/pin button
-					onReplyToggle: this.handleReplyToggle.bind(this),		// callback for the hover reply button
+					onHighlight: (targetId: string) => { void this.handleMessagePin(file, targetId); },
+					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
 					onScrollToReply: (targetId: string) => { void this.scrollToMessage(file, targetId); }	// callback for the reply banner
 				});
 
-				if (context.filterPinnedOnly) {
-					const pinned = entry.message.header.extra.pinned === "true";
-					wrapper.classList.toggle(
-						"hidden-by-pin-filter",
-						!pinned
-					);
-				}
-
-				// row wraps bubble + reply button; entry.element stays the bubble itself
+				// nothing to do for the pinned-only filter here: the row carries data-pinned
+				// and the container carries the filter class, so CSS covers it on mount
 				el.appendChild(row);
-				entry.element = wrapper;
-
 
 
 				// apply the config styles to all html containers of the file (cascades down to every individual message)
@@ -235,13 +305,10 @@ export default class ChatNotesPlugin extends Plugin {
 					note.lastAppliedConfig = note.configCache;
 				}
 
-				// highlight message if its pinned
-				if (entry.message.header.extra.pinned === "true") {
-					this.applyMessageHighlightStyle(
-						entry.element,
-						this.getConfigCache(this.currentFile!),
-						true
-					)
+				// highlight message if its pinned - `row` and `config` are the ones for THIS
+				// file, not for whichever file happens to be focused
+				if (msg.header.extra.pinned === "true") {
+					this.applyMessageHighlightStyle(row, config, true)
 				}
 
 				// Render message content as markdown
@@ -267,6 +334,8 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.resizeObserver?.disconnect();
+		this.replyTargetStyleEl?.remove();
 		this.chatInputEl?.remove();
 	}
 
@@ -298,9 +367,15 @@ export default class ChatNotesPlugin extends Plugin {
 		this.setInputValue(saved);
 		void this.updateReplyBanner();
 
+		/* A leaf showing this file for the first time has a container without the filter
+		   class. contentEl survives a reading <-> live preview switch, so this only has to
+		   happen when the view starts showing the file, not on every mode change. */
+		this.applyPinFilter(newFile);
+
 		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
-		addPinButton(view, this.showPinnedMessagesOnly.bind(this));
+		// bound to this view, so the button filters the file it belongs to
+		addPinButton(view, () => this.togglePinFilter(view));
 
 		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 		input.style.display = "flex";
@@ -370,25 +445,41 @@ export default class ChatNotesPlugin extends Plugin {
 		this.resizeObserver.observe(el);
 	}
 
+	repositionActiveChatInput() {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) this.updateChatInputPosition(view);
+	}
+
 	updateChatInputPosition(view: MarkdownView) {
 		// set/update the position and size of the message input field
 
 		const input = this.getChatInput();
-		const inner =
-			view.containerEl.querySelector(".cm-contentContainer") ||
-			view.containerEl.querySelector(".markdown-preview-sizer");
-		if (!inner) return;
 
-		// bubbles sit inset from the content area by the reply gutter, so the input takes
-		// the same inset - read off the DOM to stay tied to the one --msg-reply-gutter
+		/* Picked by mode, never by a `||` fallback: Obsidian keeps BOTH subviews mounted and
+		   hides the inactive one, so .cm-contentContainer still exists in reading mode - the
+		   fallback never fired and the hidden element measured 0x0, collapsing the input and
+		   throwing it to the left. Each selector is scoped to its own subview so a theme's
+		   stray sizer can't win. */
+		const inner = view.getMode() === "preview"
+			? view.containerEl.querySelector(".markdown-reading-view .markdown-preview-sizer")
+			: view.containerEl.querySelector(".markdown-source-view .cm-contentContainer");
+		if (!(inner instanceof HTMLElement)) return;
+
+		const rect = inner.getBoundingClientRect();
+		// hidden pane, or called mid-transition before layout settled: keep the last good
+		// geometry rather than writing a collapsed one that then sticks until a resize
+		if (rect.width <= 0) return;
+
+		/* Bubbles sit inset from the content area by the reply gutter, so the input takes the
+		   same inset. Read off contentEl - that's where applyStyles sets it, so the value
+		   doesn't depend on which subview `inner` happens to be. */
 		const gutter = parseFloat(
-			getComputedStyle(inner).getPropertyValue("--msg-reply-gutter")
+			getComputedStyle(view.contentEl).getPropertyValue("--msg-reply-gutter")
 		) || 0;
 
 		// grows/shrinks the field around its own centre, so it stays on the bubbles' axis
 		const widthOffset = this.settings.inputWidthOffset;
 
-		const rect = inner.getBoundingClientRect();
 		const parentRect = view.contentEl.getBoundingClientRect();
 		const offsetLeft = rect.left - parentRect.left;
 
@@ -524,68 +615,92 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	async handleMessagePin(msgId: string, isPinned: boolean){
+	/* The pinned state is flipped inside the write, against the file's own text, so two quick
+	   clicks can't both read the same "before" value. `file` comes from the render that owns
+	   the button, not from whichever file happens to be focused. */
+	async handleMessagePin(file: TFile, msgId: string){
 
-		if (!this.currentFile) throw new Error("Current file is not set");
-		const config = this.getConfigCache(this.currentFile);
-		const context = await this.getArchiveContext(this.currentFile);
-		const entry = context.getEntry(msgId);
-		const msg = entry.message
+		const pinState = await this.toggleMessagePinned(file, msgId);
+		if (pinState === null) return;
 
-		const el = entry.element
-		if (!el) throw new Error("Rendered element missing.");
-
-		const pinState = !(msg.header.extra.pinned === "true")
-		this.applyMessageHighlightStyle(el, config, pinState);
-		// update context
-		msg.header.extra.pinned = `${pinState}`;
-		await this.setMessageHeaderPinned(this.currentFile, entry, pinState);  // this triggers CBP
-
-		if (pinState){
-			context.pinnedMessagesAmount += 1
-		} else {
-			context.pinnedMessagesAmount -= 1
+		// paint every rendered copy now rather than waiting for the reparse the write
+		// triggers - the click should feel immediate
+		const config = this.getConfigCache(file);
+		for (const row of findMessageRows(this.app, file, msgId)) {
+			this.applyMessageHighlightStyle(row, config, pinState);
+			// keeps the row's own flag in step, so the pinned-only filter reacts at once
+			row.dataset.pinned = String(pinState);
 		}
-
 	}
 
-	async handleReplyToggle(msgId: string) {
+	async handleReplyToggle(file: TFile, msgId: string) {
 
-		if (!this.currentFile) throw new Error("Current file is not set");
-		const note = this.getChatNote(this.currentFile);
-		const context = await this.getArchiveContext(this.currentFile);
-
-		// clear the highlight on the previously targeted message, if any
-		if (note.replyTo) {
-			const previous = context.messageMap.get(note.replyTo);
-			previous?.element?.classList.remove("chat-message-reply-target");
-		}
+		const note = this.getChatNote(file);
 
 		// clicking the same message again cancels the reply
 		const wasSameTarget = note.replyTo === msgId;
 		note.replyTo = wasSameTarget ? undefined : msgId;
 
-		if (note.replyTo) {
-			const entry = context.getEntry(note.replyTo);
-			entry.element?.classList.add("chat-message-reply-target");
-		}
+		this.setReplyTarget(file, note.replyTo);
 
 		await this.updateReplyBanner();
 	}
 
 	// used by the banner's cross button and after a message is sent
-	async handleCancelReply() {
+	async handleCancelReply(file: TFile | null = this.currentFile) {
 
-		if (!this.currentFile) return;
-		const note = this.getChatNote(this.currentFile);
+		if (!file) return;
+		const note = this.getChatNote(file);
 		if (!note.replyTo) return;
 
-		const context = await this.getArchiveContext(this.currentFile);
-		const previous = context.messageMap.get(note.replyTo);
-		previous?.element?.classList.remove("chat-message-reply-target");
-
 		note.replyTo = undefined;
+		this.setReplyTarget(file, undefined);
+
 		await this.updateReplyBanner();
+	}
+
+	/* Records which message a file's pending reply points at, and rewrites the stylesheet that
+	   marks it. Nothing touches the rows: a generated rule styles whichever row matches,
+	   whenever it happens to be mounted, so it survives Live Preview re-inserting a cached row
+	   without re-running the codeblock processor. Clearing is just as important - a class
+	   removed by hand can't reach a row that is unmounted at the time, which is how the old
+	   target kept its outline while the new one got none. */
+	private setReplyTarget(file: TFile, msgId: string | undefined) {
+		if (msgId) this.replyTargets.set(file.path, msgId);
+		else this.replyTargets.delete(file.path);
+
+		this.refreshReplyTargetStyle();
+	}
+
+	private refreshReplyTargetStyle() {
+		if (!this.replyTargetStyleEl) {
+			/* Knowingly against obsidianmd/no-forbidden-elements, which exists to stop plugins
+			   shipping their *appearance* from JS. Nothing of the sort happens here: every
+			   declaration lives in styles.css, and this element carries only a selector naming
+			   which row is currently the target - a fact that changes at runtime and cannot be
+			   expressed statically (CSS cannot compare a container's attribute to a row's).
+			   The alternative, re-asserting a class from a MutationObserver, costs a
+			   document-wide query on every frame the DOM churns to achieve the same thing.
+			   Removed again in onunload. */
+			// eslint-disable-next-line obsidianmd/no-forbidden-elements
+			this.replyTargetStyleEl = document.createElement("style");
+			document.head.appendChild(this.replyTargetStyleEl);
+		}
+
+		// the rule carries no appearance of its own - it raises the custom properties that
+		// styles.css already consumes, so the look stays in one place
+		const rules: string[] = [];
+		for (const [path, msgId] of this.replyTargets) {
+			rules.push(
+				`.chat-message-row[data-chat-src="${cssAttr(path)}"][data-msg-id="${cssAttr(msgId)}"] {`,
+				`	--msg-reply-outline: 2px solid var(--settings-msg-reply-color, #57467e);`,
+				`	--msg-reply-btn-opacity: 1;`,
+				`	--msg-reply-btn-events: auto;`,
+				`}`
+			);
+		}
+
+		this.replyTargetStyleEl.textContent = rules.join("\n");
 	}
 
 	// syncs the input's reply banner with the current file's pending reply target
@@ -655,38 +770,29 @@ export default class ChatNotesPlugin extends Plugin {
 			extra.reply_to = note.replyTo;		// key the renderer already reads
 		}
 
-		const header = new Header(
-			context.nextMessageId(),
-			overrides?.author || context.resolveDefaultAuthor(),
-			overrides?.timestamp || formatTimestamp(),
-			extra
-		);
+		const author = overrides?.author || context.resolveDefaultAuthor();
+		const timestamp = overrides?.timestamp || formatTimestamp();
 
-		const message = Message.create(header, content);
-		const raw = message.toString();
+		/* The id is allocated from the text being written, inside the atomic read-modify-
+		   write, rather than from the cached model. Two sends inside the metadata debounce
+		   would otherwise both read the same highest id and the second would collide. */
+		await this.app.vault.process(file, data => {
+			const [messages] = parseMessages(data);
+			const scratch = new ArchiveContext(file, messages);
 
-		const data = await this.app.vault.read(file);
-		// guarantee the block opens on its own line, whatever the file happened to end with
-		const prefix = data.endsWith("\n") ? data : data + "\n";
+			const message = Message.create(
+				new Header(scratch.nextMessageId(), author, timestamp, extra),
+				content
+			);
 
-		const startLine = prefix.split("\n").length - 1;
-		const blockLines = raw.split("\n");
-
-		// registered before the write, not after: modify() makes the codeblock processor
-		// rerun, and it throws if the context has no entry for the block it's rendering
-		context.addMessage({
-			id: header.id,
-			message,
-			startLine,
-			// lastIndexOf, so a "````" line inside the content can't be mistaken for the fence
-			endLine: startLine + blockLines.lastIndexOf("````")
+			// guarantee the block opens on its own line, whatever the file happened to end with
+			const prefix = data.endsWith("\n") ? data : data + "\n";
+			return prefix + message.toString();
 		});
-
-		await this.app.vault.modify(file, prefix + raw);
 	}
 
 	/* Jump to the end of the chat after a send. A single jump would land at the document's
-	   *old* bottom - vault.modify only schedules the codeblock processor. Waiting for the
+	   *old* bottom - the write only schedules the codeblock processor. Waiting for the
 	   render instead deadlocks: both view modes only render near the viewport, so a message
 	   below the fold renders *because* something scrolled to it. Hence: scroll immediately,
 	   then keep re-scrolling for a short window, dragging the render along. */
@@ -709,9 +815,58 @@ export default class ChatNotesPlugin extends Plugin {
 		pin();
 	}
 
-	async showPinnedMessagesOnly(){
-		const context = await this.getArchiveContext(this.currentFile!);
-		context.updateVisibility();
+	/* Toggles the pinned-only filter for the view's file. State lives on the ChatNote, not on
+	   the archive context: contexts are discarded whenever the file changes, so a filter kept
+	   there would switch itself off mid-typing. */
+	togglePinFilter(view: MarkdownView) {
+		const file = view.file;
+		if (!file) return;
+
+		const note = this.getChatNote(file);
+		note.pinFilter = !note.pinFilter;
+
+		this.applyPinFilter(file, { animate: true });
+	}
+
+	/* Applies the pinned-only filter by putting one class on each of the file's containers.
+	   The hiding itself is CSS, matched against the data-pinned flag every row carries from
+	   render - so it covers rows that mount later, or that Live Preview re-inserts from its
+	   cache without re-running the codeblock processor. Nothing here walks the rows to hide
+	   them; the walk below is only to animate what moved. */
+	applyPinFilter(file: TFile, options?: { animate?: boolean }) {
+		const on = this.getChatNote(file).pinFilter === true;
+		const animate = options?.animate === true;
+
+		const before = new Map<HTMLElement, number>();
+		if (animate) {
+			for (const rowsById of collectMessageRows(this.app, file)) {
+				for (const rows of rowsById.values()) {
+					for (const row of rows) before.set(row, row.getBoundingClientRect().top);
+				}
+			}
+		}
+
+		for (const container of getActiveContainers(this.app, file)) {
+			container.classList.toggle("msg-pinned-only", on);
+		}
+
+		for (const [row, firstTop] of before) {
+			// offsetParent is null once the CSS rule above has hidden it
+			if (!row.isConnected || row.offsetParent === null) continue;
+
+			const deltaY = firstTop - row.getBoundingClientRect().top;
+			if (deltaY === 0) continue;
+
+			row.style.transform = `translateY(${deltaY}px)`;
+			row.style.transition = "transform 0s";
+			row.offsetHeight;	// forced reflow, so the transition below actually runs
+			row.style.transition = "transform 180ms cubic-bezier(0.34, 1.35, 0.64, 1)";
+			row.style.transform = "";
+
+			row.addEventListener("transitionend", () => {
+				row.style.transition = "";
+			}, { once: true });
+		}
 	}
 
 	async scrollToMessage(file: TFile, msgId: string, options?: {
@@ -720,52 +875,55 @@ export default class ChatNotesPlugin extends Plugin {
 		highlight?: boolean;
 	}) {
 		const context = await this.getArchiveContext(file);
-		const entry = context.getEntry(msgId);
 
-		// Both view modes only render messages near the current scroll position, so
-		// entry.element is missing or detached for anything off screen. Jump to its source
-		// line first (which mounts it via the codeblock processor), then wait for that
-		// render before the precise scroll + highlight.
-		if (!entry.element || !entry.element.isConnected) {
+		let row = findMessageRows(this.app, file, msgId).find(r => r.isConnected);
+
+		/* Both view modes only render messages near the current scroll position, so a message
+		   far from the viewport has no row at all. Jump to its source line first - that mounts
+		   it through the codeblock processor - then wait for the row to appear. */
+		if (!row) {
+			const entry = context.messageMap.get(msgId);
+			if (!entry) return false;
+
 			const view = this.app.workspace.getLeavesOfType("markdown")
 				.map(leaf => leaf.view)
 				.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 
 			if (view) {
 				view.setEphemeralState({ line: entry.startLine });
-				await this.waitForRenderedElement(entry);
+				row = await this.waitForMessageRow(file, msgId);
 			}
 		}
 
-		if (!entry.element) return false;
+		if (!row) return false;
 
-		entry.element.scrollIntoView({
+		row.scrollIntoView({
 			behavior: options?.behavior ?? "smooth",
 			block: options?.block ?? "center",
 			inline: "nearest",
 		});
 
 		// wait until scrolling has finished and then play the highlight animation
-		await this.waitUntilVisible(entry.element);
+		await this.waitUntilVisible(row);
 
 		if (options?.highlight ?? true) {
-			entry.element.classList.add("chat-message-scroll-highlight");
-			setTimeout(() => {
-				if (entry.element) {
-					entry.element.classList.remove("chat-message-scroll-highlight");
-				}
-			}, 900);
+			const target = row;
+			target.classList.add("chat-message-scroll-highlight");
+			setTimeout(() => target.classList.remove("chat-message-scroll-highlight"), 900);
 		}
 
 		return true;
 	}
 
-	// polls until the codeblock processor has (re)rendered this entry into the live DOM
-	async waitForRenderedElement(entry: MessageEntry, timeoutMs = 1500): Promise<void> {
+	// polls until the codeblock processor has mounted a row for this message
+	async waitForMessageRow(file: TFile, msgId: string, timeoutMs = 1500): Promise<HTMLElement | undefined> {
 		const start = performance.now();
 
-		while (!entry.element || !entry.element.isConnected) {
-			if (performance.now() - start > timeoutMs) return;
+		for (;;) {
+			const row = findMessageRows(this.app, file, msgId).find(r => r.isConnected);
+			if (row) return row;
+
+			if (performance.now() - start > timeoutMs) return undefined;
 			await new Promise(resolve => requestAnimationFrame(resolve));
 		}
 	}
@@ -909,8 +1067,45 @@ export default class ChatNotesPlugin extends Plugin {
 			);
 		}
 
-		// unconditional: it also re-sides the author badges when `author` changes
-		context.refreshStylesPerMessage(config);
+	}
+
+	/* Per-message styling that the container-level cascade can't express: which gutter the
+	   author badge sits in, and the pinned bubbles that override the shared colour.
+
+	   Walks the rendered rows rather than the message map - only rows on screen can be
+	   styled, and in a long chat they are a tiny fraction of the file. */
+	applyPerMessageStyles(file: TFile, context: ArchiveContext, config: ChatConfig) {
+
+		for (const rowsById of collectMessageRows(this.app, file)) {
+			for (const [id, rows] of rowsById) {
+				const message = context.messageMap.get(id)?.message;
+				if (!message) continue;
+
+				const pinned = message.header.extra.pinned === "true";
+				const color = pinned
+					? config.messageHighlightColor
+					: config.messageBgColor;
+
+				for (const row of rows) {
+					row.classList.toggle("is-owner", context.isOwnerMessage(message));
+
+					/* Brings the row's own pinned flag back in line with the model. The
+					   processor stamps it at render, but a block re-rendered from a model that
+					   was momentarily behind the file (right after a write) carries the old
+					   value - and the pinned-only filter matches on exactly this. */
+					row.dataset.pinned = String(pinned);
+
+					// `continue`, not `return` - one colourless message must not abandon the sweep
+					if (!color) continue;
+
+					row.style.setProperty("--settings-msg-bg-color", color);
+					row.style.setProperty(
+						"--settings-msg-text-color",
+						getReadableTextColor(color)
+					);
+				}
+			}
+		}
 	}
 
 	// the config that isn't CSS - plain values the message-building code reads
@@ -919,18 +1114,16 @@ export default class ChatNotesPlugin extends Plugin {
 		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
 	}
 
-	applyMessageHighlightStyle(msg: HTMLElement, config: ChatConfig, isPinned: boolean){
-		// override the background color for highlighted Messages
+	/* Overrides the bubble colour for a highlighted (pinned) message. Takes the ROW, not the
+	   bubble: the speech-bubble tail is a sibling of the bubble (it has to be - see
+	   .chat-message's overflow:hidden) so a property set on the bubble would never reach it. */
+	applyMessageHighlightStyle(target: HTMLElement, config: ChatConfig, isPinned: boolean){
 
 		const color = isPinned
 			? config.messageHighlightColor
 			: config.messageBgColor;
 
 		if (!color) return;
-
-		// set on the row, not the bubble: the speech-bubble tail is a sibling of the bubble
-		// (it has to be - see .chat-message's overflow:hidden) and can't inherit from it
-		const target = msg.parentElement ?? msg;
 
 		target.style.setProperty(
 			"--settings-msg-bg-color",
@@ -956,14 +1149,17 @@ export default class ChatNotesPlugin extends Plugin {
 		// even when the file isn't open in any view right now
 		this.applyConfigToContext(context, config);
 
-		const allContainers = getActiveContainers(this.app, file)
-		if (!allContainers) return;
-
-		for (const fileContainers of allContainers) {
-			for (const container of fileContainers) {
-					await this.applyStyles(container, config, context);
-			}
+		for (const container of getActiveContainers(this.app, file)) {
+			await this.applyStyles(container, config, context);
 		}
+
+		/* Once for the file, not once per container: it walks the rendered rows itself, so
+		   running it inside the loop above just repeated the same sweep. */
+		this.applyPerMessageStyles(file, context, config);
+
+		// the pinned-only filter is a class on rows, so a re-render or a config sweep has to
+		// re-assert it - without animating, since nothing moved from the reader's point of view
+		this.applyPinFilter(file);
 
 		// the author badge setting widens the gutter the input's geometry derives from;
 		// the ResizeObserver won't fire for it, since contentEl itself doesn't resize
@@ -1040,6 +1236,39 @@ export default class ChatNotesPlugin extends Plugin {
 		return note.isChatNote;
 	}
 
+	/* Replaces a file's parsed model when its text changes - the one invalidation rule the
+	   whole cache needs, now that nothing fragile is cached alongside it.
+
+	   Gated on a context already existing: this event fires for every markdown file in the
+	   vault on every save, and building models for files nobody has rendered would parse the
+	   whole vault. Rebuilt eagerly rather than dropped because `data` is already in hand; a
+	   lazy drop would trade this parse for a parse *and* a read on the next render.
+
+	   Note the metadata cache is debounced, so during typing the model briefly lags the file.
+	   Nothing depends on it being current: writes re-locate their block by id, and a block
+	   the model hasn't seen is rendered straight from its own source. */
+	invalidateArchiveContext(file: TFile, data: string) {
+		if (!this.archiveContexts.has(file.path)) return;
+
+		if (!isChatFile(this.app, file)) {
+			this.archiveContexts.delete(file.path);
+			return;
+		}
+
+		const [messages] = parseMessages(data);
+		const context = new ArchiveContext(file, messages);
+
+		const config = this.getConfigCache(file);
+		this.applyConfigToContext(context, config);
+		this.archiveContexts.set(file.path, Promise.resolve(context));
+
+		/* Rows already on screen were styled and classed from the model that just got
+		   replaced. Newly mounted rows pick this up from the processor; these are the ones
+		   that were already there. */
+		this.applyPerMessageStyles(file, context, config);
+		this.applyPinFilter(file);
+	}
+
 	async getArchiveContext(file: TFile): Promise<ArchiveContext> {
 
  		// the promise is cached, not the context: the codeblock processor runs concurrently
@@ -1058,39 +1287,130 @@ export default class ChatNotesPlugin extends Plugin {
 		return contextPromise;
 	}
 
-	async setMessageHeaderPinned(file: TFile, entry: MessageEntry, pinned: boolean) {
+	/* The one path that rewrites a message block.
 
-		const content = await this.app.vault.read(file);
-		const lines = content.split("\n");
-		const start = entry.startLine;
+	   It locates the block by **id, in the text it is about to modify** - never from a cached
+	   line number. Any edit above a message shifts its lines, and the context can lag the
+	   file by a metadata debounce, so a write keyed off `entry.startLine` could seek the
+	   header separator of a different message and splice into it. That was silent corruption.
 
-		const headerEnd = lines.indexOf(
-			"~~~",
-			start + 1
-		);
+	   Reads through the open editor when the file has one: an editor with unsaved changes has
+	   not reached disk, so vault.read would return superseded text and the write would
+	   clobber whatever the user had just typed. Writing back through the editor also keeps
+	   undo history and the caret intact; vault.process is the atomic fallback otherwise.
 
-		const headerLines = lines.slice(start, headerEnd);
-		const pinnedLine = headerLines.findIndex(
-			line => line.startsWith("pinned:")
-		);
+	   `transform` receives the block's own lines and returns their replacement, or null to
+	   remove the block entirely. Returns false when the message is no longer in the file. */
+	async withMessageBlock(
+		file: TFile,
+		msgId: string,
+		transform: (block: { message: Message; lines: string[] }) => string[] | null
+	): Promise<boolean> {
 
-		if (pinnedLine !== -1) {
-			lines[start + pinnedLine] =
-				`pinned: ${pinned}`;
-		} else {
-			// add it before ~~~
-			lines.splice(
-				headerEnd,
-				0,
-				`pinned: ${pinned}`
-			);
+		const view = this.app.workspace.getLeavesOfType("markdown")
+			.map(leaf => leaf.view)
+			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
+
+		const editor = view?.getMode() === "source" ? view.editor : undefined;
+		const text = editor ? editor.getValue() : await this.app.vault.read(file);
+
+		const [messages] = parseMessages(text);
+		const block = messages.get(msgId);
+		if (!block) {
+			new Notice("That message is no longer in the file");
+			return false;
 		}
 
-		// this will trigger the CodeBlockProcessor to rerun
-		await this.app.vault.modify(
-			file,
-			lines.join("\n")
+		const lines = text.split("\n");
+		const blockLines = lines.slice(block.startLine, block.endLine + 1);
+		const replacement = transform({ message: block.message, lines: blockLines });
+
+		const updatedLines = [...lines];
+		updatedLines.splice(
+			block.startLine,
+			block.endLine - block.startLine + 1,
+			...(replacement ?? [])
 		);
+		const updated = updatedLines.join("\n");
+
+		/* Refresh the model from the text about to be written, BEFORE writing it, rather than
+		   waiting for the metadata cache (debounced by roughly the editor's save delay).
+
+		   Before the write, not after, because the write re-renders the block and the
+		   codeblock processor is async: it calls getArchiveContext, yields on that promise,
+		   and resumes with whatever context it captured. Refreshing afterwards means it
+		   captured the pre-write one, so the row is rebuilt describing the old state - old
+		   bubble colour, and a data-pinned the pinned-only filter then believes - and a sweep
+		   running in between cannot help, because the row it needs to fix does not exist yet.
+		   Refreshing first means every render the write provokes reads the new model.
+
+		   If the write below then fails, the model is briefly ahead of the file; the next
+		   metadata change puts it back. */
+		this.invalidateArchiveContext(file, updated);
+
+		if (editor) {
+			/* CodeMirror scrolls the selection into view on a document change, and replacing
+			   the block re-creates its widget. Between them the view jumps - to wherever the
+			   caret happens to sit, which after clicking a button is usually somewhere else
+			   in the note entirely. Toggling a pin should not move the reader. */
+			const cm = editor;
+			const scroll = cm.getScrollInfo();
+
+			cm.replaceRange(
+				replacement === null ? "" : replacement.join("\n") + "\n",
+				{ line: block.startLine, ch: 0 },
+				{ line: block.endLine + 1, ch: 0 }
+			);
+
+			cm.scrollTo(scroll.left, scroll.top);
+			// again after layout settles - the re-created widget can resize as it renders,
+			// and the scroll correction has to land after that, not before
+			requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
+		} else {
+			await this.app.vault.process(file, () => updated);
+		}
+
+		return true;
+	}
+
+	/* Flips a message's pinned state and reports the new one (null if the write didn't
+	   happen). The flip is decided from the file's own text inside the write, so two rapid
+	   clicks can't both read the same "before" value and cancel each other out. */
+	async toggleMessagePinned(file: TFile, msgId: string): Promise<boolean | null> {
+
+		let pinned: boolean | null = null;
+
+		const ok = await this.withMessageBlock(file, msgId, ({ lines }) => {
+			// patched in place rather than round-tripped through Message.toString(), which
+			// would reorder the header's keys and renormalise the body - a large, surprising
+			// diff for what is one flag
+			// hand the lines back untouched, NOT null - null means "delete this block"
+			const headerEnd = lines.indexOf("~~~");
+			if (headerEnd === -1) return lines;
+
+			// searched in the header only: a message body is free to contain a line that
+			// happens to start with "pinned:", and it must not be mistaken for the flag
+			const existing = lines
+				.slice(0, headerEnd)
+				.findIndex(line => line.startsWith("pinned:"));
+
+			// the value the way Header.fromLines reads it, so "pinned:true" counts too
+			const wasPinned = existing !== -1
+				&& lines[existing]?.slice("pinned:".length).trim() === "true";
+
+			pinned = !wasPinned;
+
+			const updated = [...lines];
+			if (existing !== -1) {
+				updated[existing] = `pinned: ${pinned}`;
+			} else {
+				updated.splice(headerEnd, 0, `pinned: ${pinned}`);
+			}
+
+			return updated;
+		});
+
+		return ok ? pinned : null;
 	}
 }
 

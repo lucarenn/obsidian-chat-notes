@@ -56,9 +56,18 @@
     overflow: hidden;
 }
 
-/* Highlight around the message currently targeted by the pending reply */
-.chat-message-reply-target {
-    outline: 2px solid var(--settings-msg-reply-color, #57467e);
+/* Outline around the message the pending reply targets, and the reply button kept visible on
+   it. WHICH row that is comes from a rule the plugin generates at runtime
+   (refreshReplyTargetStyle in main.ts); all it does is set the custom properties below on the
+   matching row.
+
+   A generated rule rather than a class on the node, for the same reason the pinned-only
+   filter is a container class: Live Preview unmounts off-screen blocks and re-inserts the DOM
+   it cached, so a class put there by hand comes back stale (the old target kept its outline)
+   and a row that was unmounted when the target changed never got one. A rule matches whatever
+   is mounted, whenever it mounts, so nothing has to touch the row at all. */
+.chat-message-row > .chat-message {
+    outline: var(--msg-reply-outline, none);
     outline-offset: 2px;
 }
 
@@ -72,14 +81,18 @@
     100% { transform: scale(1); }
 }
 
-/* Filter to hide messages that are not pinned */
-.hidden-by-pin-filter {
-    display: none !important;
-}
+/* Pinned-only filter: one class on the container, plus the data-pinned flag every row
+   carries from render (see createElementsHTML).
 
-/* the filter toggles the class on the bubble, whose siblings (reply button, badge) would
-   otherwise be left floating next to an invisible row */
-.chat-message-row:has(.hidden-by-pin-filter) {
+   Deliberately not a class toggled on each row by a sweep. Live Preview unmounts blocks that
+   scroll far off screen and re-inserts the cached DOM when they scroll back, without
+   re-running the codeblock processor - so a swept row returned unfiltered, and a row that
+   was unmounted during the sweep was never touched at all. A container rule needs no sweep:
+   it applies to whatever happens to be mounted, whenever it mounts.
+
+   Hides the row, so the bubble's siblings (reply button, author badge) go with it instead of
+   floating beside an invisible message. */
+.msg-pinned-only .chat-message-row:not([data-pinned="true"]) {
     display: none !important;
 }
 
@@ -142,7 +155,7 @@
     opacity: 0;
 }
 
-.chat-message-scroll-highlight::after {
+.chat-message-row.chat-message-scroll-highlight > .chat-message::after {
     animation: message-highlight 0.9s ease;
 }
 
@@ -525,8 +538,10 @@ padding-bottom: 80px;
 
     cursor: pointer;
 
-    opacity: 0;
-    pointer-events: none;
+    /* driven by custom properties so both the hover state and the generated reply-target
+       rule can raise it, without either needing a selector that reaches this element */
+    opacity: var(--msg-reply-btn-opacity, 0);
+    pointer-events: var(--msg-reply-btn-events, none);
     transition: opacity 120ms ease;
 }
 
@@ -554,11 +569,11 @@ padding-bottom: 80px;
     height: 15px;
 }
 
-/* bound to the whole row, so moving from bubble to button crosses no dead zone */
-.chat-message-row:hover .msg-reply-btn,
-.chat-message-reply-target .msg-reply-btn {
-    opacity: 1;
-    pointer-events: auto;
+/* set on the row, not the button, so moving the mouse from bubble to button crosses no dead
+   zone - and so the generated reply-target rule can raise the same two properties */
+.chat-message-row:hover {
+    --msg-reply-btn-opacity: 1;
+    --msg-reply-btn-events: auto;
 }
 
 /* --------------------------------*/

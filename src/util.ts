@@ -218,34 +218,109 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 	return [messages, pinnedMessageCounter];
 }
 
-// all html containers of a file - one set per open leaf, reading + live preview
-export function getActiveContainers(app: App, file: TAbstractFile){
+/* Every html container the file is currently rendered in - one per open leaf. Flat and
+   deduped: previewMode's container lives *inside* contentEl, so keeping both would find
+   every message row twice, which is harmless for setting a CSS variable but not for a
+   measure-and-animate pass. Always an array, so "not open anywhere" is an empty loop
+   rather than a branch at every call site. */
+export function getActiveContainers(app: App, file: TAbstractFile): HTMLElement[] {
 
 	const leaves = app.workspace.getLeavesOfType("markdown");
 
-	const containers = []
+	const containers: HTMLElement[] = [];
 	for (const leaf of leaves) {
 		const view = leaf.view;
 
 		if (!(view instanceof MarkdownView)) continue;
 		if (view.file?.path !== file.path) continue;
 
-		const fileContainers = [
-			view.previewMode?.containerEl,
-			view.contentEl,
-		];
+		for (const maybe of [view.previewMode?.containerEl, view.contentEl]) {
+			if (!(maybe instanceof HTMLElement)) continue;
+			const candidate: HTMLElement = maybe;
 
-		const availableFileContaiers = []
-		for (const container of fileContainers){
-			if (container instanceof HTMLElement) {
-				availableFileContaiers.push(container)
+			// keep only the outermost of any nested pair
+			if (containers.some(existing => existing.contains(candidate))) continue;
+			for (let i = containers.length - 1; i >= 0; i--) {
+				const existing = containers[i];
+				if (existing && candidate.contains(existing)) containers.splice(i, 1);
 			}
-		}
 
-		containers.push(availableFileContaiers)
+			containers.push(candidate);
+		}
 	}
 
-	if (containers.length == 0) return;
-
 	return containers;
+}
+
+/* The rendered rows of a chat file, found by querying the DOM rather than by remembering
+   nodes. A message has one row per place it is rendered (reading view and live preview are
+   both mounted, the same note can be open in several leaves), and rows come and go as the
+   view scrolls - so a stored reference is stale as soon as anything re-renders, while a
+   query is right by construction.
+
+   Searched from the document down, NOT from the leaf containers a file is open in. Obsidian
+   renders chat blocks in more places than those - embeds, hover popovers, canvas cards,
+   popout windows - and a sweep that misses one leaves a stray row behind (the pin filter
+   hiding only some of the messages was exactly this). `data-chat-src` is what keeps a
+   document-wide search correct: it pins each row to the note that owns it, so an embedded
+   chat's rows never answer for the host's ids. */
+function rowsFor(app: App, sourcePath: string, msgId?: string): HTMLElement[] {
+	const selector = msgId === undefined
+		? `.chat-message-row[data-msg-id][data-chat-src="${CSS.escape(sourcePath)}"]`
+		: `.chat-message-row[data-msg-id="${CSS.escape(msgId)}"][data-chat-src="${CSS.escape(sourcePath)}"]`;
+
+	const rows: HTMLElement[] = [];
+
+	for (const doc of chatDocuments(app)) {
+		for (const row of Array.from(doc.querySelectorAll(selector))) {
+			if (row instanceof HTMLElement) rows.push(row);
+		}
+	}
+
+	return rows;
+}
+
+/* Every document the workspace renders into. A popout window is a separate `window` with its
+   own document - not an iframe - so it is reached through the leaves that live in it rather
+   than by scanning the main document. */
+function chatDocuments(app: App): Document[] {
+	const docs = new Set<Document>([document]);
+
+	app.workspace.iterateAllLeaves(leaf => {
+		const doc = leaf.view?.containerEl?.ownerDocument;
+		if (doc) docs.add(doc);
+	});
+
+	return Array.from(docs);
+}
+
+// every rendered row for one message
+export function findMessageRows(app: App, file: TFile, msgId: string): HTMLElement[] {
+	return rowsFor(app, file.path, msgId);
+}
+
+/* All rendered rows of a file, grouped by the scroller they live in and keyed by message id.
+   Grouped because geometry is per scroller: a measure-then-animate pass has to compare each
+   row against others it actually shares a layout with, not across leaves. */
+export function collectMessageRows(app: App, file: TFile): Map<string, HTMLElement[]>[] {
+	const byScroller = new Map<Element | null, Map<string, HTMLElement[]>>();
+
+	for (const row of rowsFor(app, file.path)) {
+		const id = row.dataset.msgId;
+		if (id === undefined) continue;
+
+		const scroller = row.closest(".cm-scroller, .markdown-preview-view");
+
+		let byId = byScroller.get(scroller);
+		if (!byId) {
+			byId = new Map<string, HTMLElement[]>();
+			byScroller.set(scroller, byId);
+		}
+
+		const existing = byId.get(id);
+		if (existing) existing.push(row);
+		else byId.set(id, [row]);
+	}
+
+	return Array.from(byScroller.values());
 }
