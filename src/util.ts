@@ -171,7 +171,9 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 
 	for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 		const line = lines[lineNumber];
-		if (!line) continue;
+		// only the index guard - an EMPTY line must reach currentBlock below, it carries the
+		// markdown paragraph structure of the body (see DEVELOPMENT.md)
+		if (line === undefined) continue;
 
 		if (!insideBlock && line.trim() === "````chat-message") {
 			insideBlock = true;
@@ -353,6 +355,19 @@ export function findMessageRows(app: App, file: TFile, msgId: string): HTMLEleme
 	return rowsFor(app, file.path, msgId);
 }
 
+/* A row in the subview you are NOT in is still in the DOM - Obsidian keeps both mounted and
+   hides the inactive one - so `isConnected` does not mean "on the page". Anything under a
+   display:none ancestor has a null offsetParent, and scrolling or flashing it is invisible. */
+export function isRowRendered(row: HTMLElement): boolean {
+	return row.isConnected && row.offsetParent !== null;
+}
+
+// the scroller a row is painted in; rows of the same file in another pane, or in the hidden
+// subview, belong to a different one
+export function rowScroller(el: HTMLElement): Element | null {
+	return el.closest(".cm-scroller, .markdown-preview-view");
+}
+
 /* All rendered rows of a file, grouped by the scroller they live in and keyed by message id.
    Grouped because geometry is per scroller: a measure-then-animate pass has to compare each
    row against others it actually shares a layout with, not across leaves. */
@@ -363,7 +378,7 @@ export function collectMessageRows(app: App, file: TFile): Map<string, HTMLEleme
 		const id = row.dataset.msgId;
 		if (id === undefined) continue;
 
-		const scroller = row.closest(".cm-scroller, .markdown-preview-view");
+		const scroller = rowScroller(row);
 
 		let byId = byScroller.get(scroller);
 		if (!byId) {

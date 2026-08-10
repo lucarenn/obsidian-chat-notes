@@ -98,14 +98,19 @@
     background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
 }
 
+/* A rule that reaches Obsidian's OWN note elements - rather than one of this plugin's classes -
+   stays under `.chat-note-view`, the class syncChatViews() puts on the content area of a view
+   showing a chat note. Unscoped, it restyles every note in the vault. */
+
 /* Set note background to transparent (just display messages) */
-.markdown-reading-view .markdown-preview-view,
-.markdown-source-view.mod-cm6 .cm-contentContainer {
-    background-color: #00000000;
+.chat-note-view .markdown-reading-view .markdown-preview-view,
+.chat-note-view .markdown-source-view.mod-cm6 .cm-contentContainer {
+    background-color: transparent;
 }
 
 /* Make common embed blocks gaps in preview mode the same as in reading mode*/
-.cm-editor .embed, .cm-editor .language-pyton, .cm-editor .block-language-img-gallery {
+.chat-note-view .cm-editor .embed,
+.chat-note-view .cm-editor .block-language-img-gallery {
     margin-top: 15px !important;
     margin-bottom: 15px !important;
 }
@@ -475,13 +480,14 @@
     box-shadow: 0 0 0 1px var(--text-error);
 }
 
-.cm-contentContainer,
-.markdown-preview-sizer {
-padding-bottom: 80px;
+/* clearance for the chat input, which floats over the bottom of the content area */
+.chat-note-view .cm-contentContainer,
+.chat-note-view .markdown-preview-sizer {
+    padding-bottom: 80px;
 }
 
-.markdown-preview-view,
-.cm-sizer {
+.chat-note-view .markdown-preview-view,
+.chat-note-view .cm-sizer {
     position: relative;
 }
 

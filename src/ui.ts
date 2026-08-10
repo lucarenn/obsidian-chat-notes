@@ -142,8 +142,10 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 	// suggestions and placeholder are pulled fresh each time the row opens: both shift as
 	// messages are added, files switched or YAML edited
 	const refreshHeaderFields = async () => {
-		const file = plugin.app.workspace.getActiveFile();
-		if (!file || !plugin.getIsChatNote(file)) return;
+		// the file this input is mounted for, never the focused one - the two disagree when
+		// focus sits in a sidebar or a second markdown leaf
+		const file = plugin.currentFile;
+		if (!file) return;
 
 		const context = await plugin.getArchiveContext(file);
 
@@ -173,6 +175,7 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 	const textarea = inputRow.createEl("textarea", {
 		cls: "chat-input"
 	});
+	textarea.setAttribute("aria-label", "Message");
 
 	const resizeInput = () => {
 		const maxHeight = plugin.settings.inputMaxHeight;
@@ -192,8 +195,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 	resizeInput();
 
 	const sendMessage = async () => {
-		const file = plugin.app.workspace.getActiveFile();
-		if (!file || !plugin.getIsChatNote(file)) return;
+		// see refreshHeaderFields: the input's own file, so a send can't land in another note
+		const file = plugin.currentFile;
+		if (!file) return;
 
 		const value = textarea.value.trim();
 		if (!value) return;
@@ -237,6 +241,23 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		textarea.focus();
 	};
 
+	/* What is currently on the keymap. Tracked rather than pushed and popped blind, because
+	   the teardown below has to know: removing a focused element from the DOM fires no blur,
+	   so unloading the plugin while the input has focus would strand a scope that goes on
+	   swallowing Mod+Enter / Mod+Up for the rest of the session. */
+	const pushed = new Set<Scope>();
+
+	const pushScope = (scope: Scope) => {
+		if (pushed.has(scope)) return;
+		pushed.add(scope);
+		plugin.app.keymap.pushScope(scope);
+	};
+
+	const popScope = (scope: Scope) => {
+		if (!pushed.delete(scope)) return;
+		plugin.app.keymap.popScope(scope);
+	};
+
 	// Obsidian's global hotkey scope can swallow these before a plain keydown listener sees
 	// them; pushing our own scope while the input is focused makes our binding win.
 	// Mod+Up needs this doubly: it is bound globally to "Scroll to Top".
@@ -249,8 +270,8 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		openHeaderArea();
 		return false;
 	});
-	textarea.addEventListener("focus", () => plugin.app.keymap.pushScope(sendScope));
-	textarea.addEventListener("blur", () => plugin.app.keymap.popScope(sendScope));
+	textarea.addEventListener("focus", () => pushScope(sendScope));
+	textarea.addEventListener("blur", () => popScope(sendScope));
 
 	const headerScope = new Scope(plugin.app.scope);
 	headerScope.register(["Mod"], "ArrowUp", () => {
@@ -266,15 +287,21 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		// blur always fires before the next element's focus, so moving between the two
 		// fields pops and re-pushes in order rather than stacking the scope twice
 		field.addEventListener("focus", () => {
-			plugin.app.keymap.pushScope(headerScope);
+			pushScope(headerScope);
 			// deliberately back in the row, so an earlier dismissal no longer applies
 			setHeaderAreaCollapsed(false);
 		});
-		field.addEventListener("blur", () => plugin.app.keymap.popScope(headerScope));
+		field.addEventListener("blur", () => popScope(headerScope));
 	}
+
+	const teardown = () => {
+		for (const scope of Array.from(pushed)) popScope(scope);
+	};
 
 	const button = inputRow.createEl("button");
 	button.className = "chat-send-button";
+	button.type = "button";
+	button.setAttribute("aria-label", "Send message");
 	setIcon(button, "send");
 	button.onclick = sendMessage;
 
@@ -282,29 +309,39 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		container,
 		textarea,
 		replyBanner,
-		replyText
+		replyText,
+		teardown
 	};
 }
 
 
-/* Which views already carry each action. WeakSets rather than a flag stashed on the view:
-   the view stays untyped either way, and these drop their entry when the view is collected. */
-const viewsWithScrollActions = new WeakSet<MarkdownView>();
-const viewsWithPinAction = new WeakSet<MarkdownView>();
+/* The action elements each view carries, so they can be taken away again - Obsidian reclaims
+   nothing added with addAction, so they would otherwise sit in the tab header of a note that
+   is no longer a chat, and outlive the plugin itself. Keyed by view in a WeakMap: the view
+   stays untyped, and the entry goes when the view is collected. */
+const viewActions = new WeakMap<MarkdownView, Map<string, HTMLElement>>();
+
+// keyed by icon, so each action's "already there?" guard is the map itself
+function addViewAction(view: MarkdownView, icon: string, title: string, onPress: () => void) {
+	let actions = viewActions.get(view);
+	if (!actions) {
+		actions = new Map();
+		viewActions.set(view, actions);
+	}
+
+	if (actions.has(icon)) return;
+	actions.set(icon, view.addAction(icon, title, onPress));
+}
 
 export function addScrollButtons(view: MarkdownView) {
 
 	if (!view) return;
 
-	// Avoid adding multiple times
-	if (viewsWithScrollActions.has(view)) return;
-	viewsWithScrollActions.add(view);
-
-	view.addAction("arrow-up", "Scroll to top", () => {
+	addViewAction(view, "arrow-up", "Scroll to top", () => {
 		scrollDocument(view, "top")
 	});
 
-	view.addAction("arrow-down", "Scroll to bottom", () => {
+	addViewAction(view, "arrow-down", "Scroll to bottom", () => {
 		scrollDocument(view, "bottom")
 	});
 }
@@ -314,11 +351,16 @@ export function addPinButton(view: MarkdownView, onPress: ()=>void) {
 
 	if (!view) return;
 
-	// Avoid adding multiple times
-	if (viewsWithPinAction.has(view)) return;
-	viewsWithPinAction.add(view);
+	addViewAction(view, "pin", "Show pinned messages", () => onPress());
+}
 
-	view.addAction("pin", "Show pinned messages", () => onPress());
+// dropped when the view moves to a note that isn't a chat, and for every open view on unload
+export function removeChatViewActions(view: MarkdownView) {
+	const actions = viewActions.get(view);
+	if (!actions) return;
+
+	for (const action of actions.values()) action.remove();
+	viewActions.delete(view);
 }
 
 /**
@@ -372,7 +414,8 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	if (replyTargetId) {
 		const banner = createReplyBanner(
 			context.messageMap.get(replyTargetId),
-			() => onScrollToReply(replyTargetId)
+			// this row, so the jump lands in the pane the click came from
+			() => onScrollToReply(replyTargetId, row)
 		);
 		wrapper.append(banner);
 	}
@@ -621,20 +664,26 @@ function createMessageActionsMenu({
 		e.stopPropagation();
 	});
 
+	// icon-only, so each carries its own label - it is both the accessible name and the
+	// tooltip Obsidian renders from [aria-label]
 	const editBtn = document.createElement("button");
 	editBtn.className = "msg-action-btn msg-edit-btn";
+	editBtn.setAttribute("aria-label", "Edit message");
 	setIcon(editBtn, "pencil");
 
 	const deleteBtn = document.createElement("button");
 	deleteBtn.className = "msg-action-btn msg-delete-btn";
+	deleteBtn.setAttribute("aria-label", "Delete message");
 	setIcon(deleteBtn, "trash");
 
 	const copyBtn = document.createElement("button");
 	copyBtn.className = "msg-action-btn msg-copy-btn";
+	copyBtn.setAttribute("aria-label", "Copy message");
 	setIcon(copyBtn, "copy");
 
 	const menuBtn = document.createElement("button");
 	menuBtn.className = "msg-action-btn msg-menu-btn";
+	menuBtn.setAttribute("aria-label", "Message actions");
 	setIcon(menuBtn, "menu");
 	menuBtn.addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -643,6 +692,7 @@ function createMessageActionsMenu({
 
 	const favBtn = document.createElement("button");
 	favBtn.className = "msg-action-btn msg-fav-btn";
+	favBtn.setAttribute("aria-label", "Pin message");
 	setIcon(favBtn, "pin");
 	favBtn.addEventListener("click", (e) => {
 		e.stopPropagation();

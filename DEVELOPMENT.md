@@ -176,6 +176,18 @@ message far away has no node at all. `scrollToMessage` therefore jumps to its *s
 first (`setEphemeralState`), which mounts it via the codeblock processor, then polls
 `waitForMessageRow` before scrolling precisely.
 
+**A row can be in the DOM and not on the page.** Both subviews stay mounted, so once Live
+Preview has rendered, its rows are still in the document while you read — `isConnected` is
+true for every one of them. Picking one of those to scroll to is a silent no-op: the node has
+no layout, `scrollIntoView` does nothing, the flash plays where nobody can see it, and
+`waitUntilVisible` burns its full timeout on a 0×0 rect. That was the reply banner doing
+nothing in Reading View, but only in a tab that had been in Live Preview at some point.
+
+So anything that resolves "the row for this message" filters with `isRowRendered` (a null
+`offsetParent`, which is also how the pin filter's animation skips hidden rows), and anything
+answering a *click* resolves it in `rowScroller(origin)` — the scroller the click came from —
+so a note open in two panes scrolls the pane the reader is actually looking at.
+
 **Writes locate their block by id, in the text they are about to modify.** `withMessageBlock`
 is the single write path. It never trusts a cached line number: any edit above a message
 shifts it, and the model can lag the file by a metadata-cache debounce, so a write keyed off
@@ -210,6 +222,13 @@ hasn't seen — typed by hand, pasted, or appended a moment ago — is parsed st
 Live Preview re-runs the processor on every keystroke while a block is being typed, so
 throwing (or rebuilding the model) there fired once per character.
 
+**Blank lines are content.** `parseMessages` walks the file line by line and must skip only
+the index guard, never an empty line: blank lines carry the body's markdown paragraph
+structure. Dropping them is not cosmetic — the processor prefers the *parsed* body over the
+block's own source, so every multi-paragraph message rendered as one paragraph, and the
+inline editor is seeded from that same body and saves it back, so an edit wrote the collapsed
+version to disk.
+
 **Scroll-on-send can't wait for the render.** The write only *schedules* the processor, and
 waiting for the new message to render deadlocks, since it renders *because* something scrolled
 to it. So `scrollToBottomAfterSend` scrolls immediately and keeps re-scrolling on
@@ -240,6 +259,11 @@ Same trick on the bubble and the input container.
 **Settings apply without a rerender.** Author/timestamp visibility and the author badges are
 always *built*, and only shown or hidden by a class on the container. That is what lets a
 settings or YAML change take effect on messages already on screen.
+
+That is also why `saveSettings` must never rebuild a view. Colour pickers and sliders fire
+`onChange` on every drag tick, so it does the cheapest thing that still shows the change:
+`updateFileConfig` + `applyConfigToFile` for the **open** chat files only. Files that aren't
+open need nothing — `handleFileSwitch` resolves a file's config when it is opened.
 
 **Live Preview re-inserts cached rows without re-running the processor.** CodeMirror unmounts
 block widgets that scroll far off screen and, when they scroll back, re-inserts *the DOM it
@@ -292,7 +316,21 @@ reply button width, and the chat input's own width/left maths (read back off the
 `updateChatInputPosition`). Turning on author badges just widens that one variable.
 
 **One chat input element exists**, created lazily and moved between views on file switch,
-hidden for non-chat files. Its text is cached per file on the `ChatNote`.
+hidden for non-chat files. Its text is cached per file on the `ChatNote`. It reads
+`plugin.currentFile` — the file it is mounted for — and never `getActiveFile()`, which points
+elsewhere when focus sits in a sidebar or a second markdown leaf.
+
+**Nothing the plugin puts on a view is reclaimed for it.** `syncChatViews()` is the one sweep
+that keeps this honest: it toggles `chat-note-view` on each view's `contentEl` and drops the
+`addAction` buttons from views that are no longer showing a chat note. `onunload` clears both
+for every open view, and pops the input's keymap `Scope` — a `Scope` left pushed keeps
+swallowing `Mod+Enter` for the rest of the session, and the blur handler can't be relied on to
+pop it, because removing a *focused* element from the DOM fires no blur.
+
+**Styling that reaches Obsidian's own note elements lives under `.chat-note-view`.** Note
+background, the bottom padding that clears the chat input, embed spacing — unscoped, these
+apply to every note in the vault, in every vault that merely has the plugin installed. Rules
+that only touch the plugin's own classes need no such scope.
 
 **CSS variables are prefixed `--chat-input-*`, not `--input-*`** — Obsidian's own theme
 defines `--input-radius` / `--input-border-width` globally, and reusing those names reskins

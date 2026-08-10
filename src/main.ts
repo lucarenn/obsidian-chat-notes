@@ -1,8 +1,8 @@
 import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
-import { createElementsHTML, addScrollButtons, createChatInput, addPinButton } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, findMessageBlocks, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows } from "./util"
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, findMessageBlocks, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util"
 import { ConfirmModal } from "./modals"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
@@ -40,6 +40,7 @@ export default class ChatNotesPlugin extends Plugin {
 	resizeObserver: ResizeObserver | null = null;
 	currentFile: TFile | null = null;
 	ribbonIconEl: HTMLElement | null = null;
+	chatInputTeardown: (() => void) | null = null;
 
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
@@ -92,9 +93,6 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	async onload() {
-
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Chat');
 
 		// load global settings
 		await this.loadSettings();
@@ -205,6 +203,10 @@ export default class ChatNotesPlugin extends Plugin {
 		   every step of onFileSwitch is idempotent, and the second pass restores the draft it
 		   just saved. */
 		const handleFileSwitch = () => {
+			// every open view, not just the active one: a background split can be showing a
+			// chat note too, and the one being left has to give its chat dressing back
+			this.syncChatViews();
+
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			const file = view?.file;
 			if (!view || !file) return;
@@ -230,7 +232,11 @@ export default class ChatNotesPlugin extends Plugin {
 		   across the switch. Without this the input keeps whatever geometry it measured in
 		   the previous mode. */
 		this.registerEvent(
-			this.app.workspace.on("layout-change", () => this.repositionActiveChatInput())
+			this.app.workspace.on("layout-change", () => {
+				// a rebuilt view keeps its element but not necessarily our class on it
+				this.syncChatViews();
+				this.repositionActiveChatInput();
+			})
 		);
 
 		/* on METADATA CHANGE: the file's text changed, so the parsed model is stale. This
@@ -337,7 +343,8 @@ export default class ChatNotesPlugin extends Plugin {
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
 					onHighlight: (targetId: string) => { void this.handleMessagePin(file, targetId); },
 					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
-					onScrollToReply: (targetId: string) => { void this.scrollToMessage(file, targetId); }	// callback for the reply banner
+					// callback for the reply banner; `origin` is the row it was clicked in
+					onScrollToReply: (targetId: string, origin: HTMLElement) => { void this.scrollToMessage(file, targetId, { origin }); }
 				});
 
 				// nothing to do for the pinned-only filter here: the row carries data-pinned
@@ -384,10 +391,40 @@ export default class ChatNotesPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(handleFileSwitch);
 	}
 
+	/* Obsidian reclaims none of this by itself: an element removed while focused fires no
+	   blur (so the input's keymap scope would stay pushed and go on swallowing Mod+Enter),
+	   and view actions and the container class live on views the plugin doesn't own. */
 	onunload() {
+		this.chatInputTeardown?.();
 		this.resizeObserver?.disconnect();
 		this.replyTargetStyleEl?.remove();
 		this.chatInputEl?.remove();
+
+		this.forEachMarkdownView(view => {
+			view.contentEl.classList.remove("chat-note-view");
+			removeChatViewActions(view);
+		});
+	}
+
+	forEachMarkdownView(fn: (view: MarkdownView) => void) {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			if (leaf.view instanceof MarkdownView) fn(leaf.view);
+		}
+	}
+
+	/* Marks the views currently showing a chat note, and strips the ones that aren't.
+	   `chat-note-view` scopes every rule in styles.css that reaches Obsidian's own note
+	   elements (background, bottom padding for the input, embed spacing) - unscoped they
+	   would restyle every note in the vault. The view actions follow the same lifetime:
+	   a tab that navigates away from a chat note keeps neither. */
+	syncChatViews() {
+		this.forEachMarkdownView(view => {
+			const file = view.file;
+			const isChat = !!file && this.getIsChatNote(file);
+
+			view.contentEl.classList.toggle("chat-note-view", isChat);
+			if (!isChat) removeChatViewActions(view);
+		});
 	}
 
 	/* Event Helper Methods */
@@ -471,6 +508,10 @@ export default class ChatNotesPlugin extends Plugin {
 		const currentStatus = isChatFile(this.app, file);
 		note.isChatNote = currentStatus;
 
+		// a note that just became (or stopped being) a chat gains/loses the container class
+		// and the view actions right away, not only once the rerender below lands
+		this.syncChatViews();
+
 		if (currentStatus && (currentStatus === previousStatus)) {
 			// chat file YAML was changed -> apply styles AND the non-style settings
 			await this.applyConfigToFile(file);
@@ -551,20 +592,6 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	refreshOpenFiles() {
-		const openFiles = new Set<TFile>();
-
-		this.app.workspace.iterateAllLeaves((leaf) => {
-			if (leaf.view instanceof MarkdownView && leaf.view.file) {
-				openFiles.add(leaf.view.file);
-			}
-		});
-
-		for (const file of openFiles) {
-			void this.refreshFile(file); 	// updateChatInputPosition is called inside
-		}
-	}
-
 	async refreshFile(file: TFile) {
 
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
@@ -579,12 +606,20 @@ export default class ChatNotesPlugin extends Plugin {
 				// preview = reading mode
 				view.previewMode.rerender(true);
 			} else {
-				// editor in live preview (or source mode)
+				/* editor in live preview (or source mode). rebuildView is the only thing that
+				   rebuilds the editor's widgets, and it is NOT in obsidian.d.ts - so it is
+				   probed rather than assumed, and a version without it falls back to the
+				   reading-mode path instead of throwing inside an event handler. */
 				type RebuildableLeaf = WorkspaceLeaf & {
-					rebuildView: () => Promise<void>;
+					rebuildView?: () => Promise<void>;
 				};
 
-				await (leaf as RebuildableLeaf).rebuildView();
+				const rebuild = (leaf as RebuildableLeaf).rebuildView;
+				if (typeof rebuild === "function") {
+					await rebuild.call(leaf);
+				} else {
+					view.previewMode.rerender(true);
+				}
 			}
 
 			this.updateChatInputPosition(view);
@@ -629,9 +664,11 @@ export default class ChatNotesPlugin extends Plugin {
 			"# --- optional per-file overrides, uncomment to use ---",
 			`# msgShowAuthor: ${s.showMessageAuthor}`,
 			`# msgShowTime: ${s.showMessageTimestamp}`,
+			`# msgAuthorBadges: ${s.showAuthorBadges}`,
 			`# msgDefaultAuthor: ${s.defaultAuthorMode}`,
 			`# msgScrollOnSend: ${s.scrollOnSend}`,
 			`# msgButtonShadow: ${s.enableButtonShadow}`,
+			`# msgCornerRadius: ${String(s.messageCornerRadius)}`,
 			// quoted, or YAML reads the leading "#" of a hex color as a comment
 			`# msgColor: "${s.messageBgColor}"`,
 			`# msgPinColor: "${s.messageHighlightColor}"`,
@@ -913,8 +950,8 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 
 		for (const [row, firstTop] of before) {
-			// offsetParent is null once the CSS rule above has hidden it
-			if (!row.isConnected || row.offsetParent === null) continue;
+			// nothing to animate once the CSS rule above has hidden it
+			if (!isRowRendered(row)) continue;
 
 			const deltaY = firstTop - row.getBoundingClientRect().top;
 			if (deltaY === 0) continue;
@@ -935,10 +972,27 @@ export default class ChatNotesPlugin extends Plugin {
 		behavior?: ScrollBehavior;
 		block?: ScrollLogicalPosition;
 		highlight?: boolean;
+		origin?: HTMLElement;
 	}) {
 		const context = await this.getArchiveContext(file);
 
-		let row = findMessageRows(this.app, file, msgId).find(r => r.isConnected);
+		/* The same message has a row in every place the file is rendered, and `isConnected`
+		   tells them apart not at all: the subview you are NOT in stays mounted, so once Live
+		   Preview has rendered, its rows are still in the document while you read. Picking one
+		   of those meant scrolling and flashing a hidden node - no scroll, no highlight, and a
+		   1.5s wait for a rect that never became visible.
+
+		   So: only rows actually on the page, and - when the call came from a click - only the
+		   one sharing that click's scroller. Strictly, not as a preference: a copy in another
+		   split pane is no use to the reader looking at this one, and the fallback below mounts
+		   it where they are actually looking. */
+		const origin = options?.origin;
+		const scroller = origin ? rowScroller(origin) : null;
+		const rendered = findMessageRows(this.app, file, msgId).filter(isRowRendered);
+
+		let row = scroller
+			? rendered.find(r => rowScroller(r) === scroller)
+			: rendered[0];
 
 		/* Both view modes only render messages near the current scroll position, so a message
 		   far from the viewport has no row at all. Jump to its source line first - that mounts
@@ -957,13 +1011,16 @@ export default class ChatNotesPlugin extends Plugin {
 				return false;
 			}
 
-			const view = this.app.workspace.getLeavesOfType("markdown")
+			const views = this.app.workspace.getLeavesOfType("markdown")
 				.map(leaf => leaf.view)
-				.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
+				.filter((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
+
+			// the view the click happened in, so the jump doesn't move a different pane
+			const view = (origin && views.find(v => v.containerEl.contains(origin))) || views[0];
 
 			if (view) {
 				view.setEphemeralState({ line: entry.startLine });
-				row = await this.waitForMessageRow(file, msgId);
+				row = await this.waitForMessageRow(file, msgId, scroller);
 			}
 		}
 
@@ -987,12 +1044,22 @@ export default class ChatNotesPlugin extends Plugin {
 		return true;
 	}
 
-	// polls until the codeblock processor has mounted a row for this message
-	async waitForMessageRow(file: TFile, msgId: string, timeoutMs = 1500): Promise<HTMLElement | undefined> {
+	/* Polls until the codeblock processor has mounted a row for this message. Same selection
+	   rule as scrollToMessage - a row in the hidden subview is already there and would end the
+	   poll at once, with the one being waited for still unmounted. */
+	async waitForMessageRow(
+		file: TFile,
+		msgId: string,
+		scroller: Element | null = null,
+		timeoutMs = 1500
+	): Promise<HTMLElement | undefined> {
 		const start = performance.now();
 
 		for (;;) {
-			const row = findMessageRows(this.app, file, msgId).find(r => r.isConnected);
+			const rendered = findMessageRows(this.app, file, msgId).filter(isRowRendered);
+			const row = scroller
+				? rendered.find(r => rowScroller(r) === scroller)
+				: rendered[0];
 			if (row) return row;
 
 			if (performance.now() - start > timeoutMs) return undefined;
@@ -1049,18 +1116,36 @@ export default class ChatNotesPlugin extends Plugin {
 		};
 	}
 
+	/* Colour pickers and sliders call this on every drag tick, so it does the least work that
+	   still shows the change: the config path only, never a rerender. Every setting in the tab
+	   reaches the page through applyConfigToFile (custom properties, container classes, the
+	   per-message sweep, the pin filter, the input geometry) - see "Settings apply without a
+	   rerender" in DEVELOPMENT.md.
+
+	   Open files only. A file that isn't open has no config worth refreshing: it gets a fresh
+	   one from updateFileConfig when it is opened. */
 	async saveSettings() {
 		await this.saveData(this.settings);
 
 		this.updateRibbonIcon();
-		this.updateAllFileConfigs();
-		this.refreshOpenFiles();
-	}
 
-	updateAllFileConfigs() {
-		for (const file of this.app.vault.getMarkdownFiles()) {
+		const openFiles = new Set<TFile>();
+		this.forEachMarkdownView(view => {
+			if (view.file && this.getIsChatNote(view.file)) openFiles.add(view.file);
+		});
+
+		for (const file of openFiles) {
 			this.updateFileConfig(file);
+			await this.applyConfigToFile(file);
+
+			// updateFileConfig replaced the config object and the processor's guard is an
+			// identity check, so this stops the next render applying the same config again
+			const note = this.getChatNote(file);
+			note.lastAppliedConfig = note.configCache;
 		}
+
+		// the max input height is only read while the textarea resizes itself
+		this.chatTextareaEl?.dispatchEvent(new Event("input"));
 	}
 
 	updateFileConfig(file: TAbstractFile) {
@@ -1256,6 +1341,7 @@ export default class ChatNotesPlugin extends Plugin {
 			this.chatTextareaEl = result.textarea;
 			this.chatReplyBannerEl = result.replyBanner;
 			this.chatReplyTextEl = result.replyText;
+			this.chatInputTeardown = result.teardown;
 		}
 
 		return this.chatInputEl;
