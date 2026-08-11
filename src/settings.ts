@@ -304,6 +304,24 @@ function parseStringOverride(value: unknown): string | undefined {
 	return trimmed === "" ? undefined : trimmed;
 }
 
+// every alias getFileOverrides reads, in the order the "Add override properties" command
+// writes them. Kept next to that function so the two can't drift apart.
+export const OVERRIDE_KEYS = [
+	"author",
+	"msgColor",
+	"msgPinColor",
+	"msgFlashColor",
+	"msgReplyColor",
+	"msgBorderColor",
+	"msgCornerRadius",
+	"msgShowAuthor",
+	"msgShowTime",
+	"msgAuthorBadges",
+	"msgButtonShadow",
+	"msgScrollOnSend",
+	"msgDefaultAuthor"
+];
+
 export function getFileOverrides(app: App, file: TFile): ChatConfig {
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = cache?.frontmatter;

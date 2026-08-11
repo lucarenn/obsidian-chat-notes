@@ -1,6 +1,6 @@
 import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types"
-import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig } from "./settings"
+import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui"
 import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, findMessageBlocks, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util"
 import { ConfirmModal } from "./modals"
@@ -169,6 +169,25 @@ export default class ChatNotesPlugin extends Plugin {
 							new Notice("Could not recalculate the message ids");
 						});
 					}).open();
+				}
+
+				return canRun;
+			},
+		});
+
+		this.addCommand({
+			id: "add-override-properties",
+			name: "Add override properties",
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const file = view?.file;
+				const canRun = !!file && this.getIsChatNote(file);
+
+				if (canRun && !checking) {
+					void this.addOverrideProperties(file).catch(err => {
+						console.error("Failed to add override properties", err);
+						new Notice("Could not add the override properties");
+					});
 				}
 
 				return canRun;
@@ -650,34 +669,36 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
-	/* Frontmatter for a new chat note. Only `type` (what marks a chat at all) and `author`
-	   (no global setting to fall back on) are written live - the rest stay commented out,
-	   since a present key overrides the global setting permanently and would freeze the
-	   note's appearance at creation time. */
+	// `type` marks the note as a chat; `author` has no global setting to fall back on. The
+	// overrides are left to the "Add override properties" command.
 	buildChatNoteFrontmatter(): string {
-		const s = this.settings;
-
 		return [
 			"---",
 			"type: chat-note",
 			"author: ",
-			"# --- optional per-file overrides, uncomment to use ---",
-			`# msgShowAuthor: ${s.showMessageAuthor}`,
-			`# msgShowTime: ${s.showMessageTimestamp}`,
-			`# msgAuthorBadges: ${s.showAuthorBadges}`,
-			`# msgDefaultAuthor: ${s.defaultAuthorMode}`,
-			`# msgScrollOnSend: ${s.scrollOnSend}`,
-			`# msgButtonShadow: ${s.enableButtonShadow}`,
-			`# msgCornerRadius: ${String(s.messageCornerRadius)}`,
-			// quoted, or YAML reads the leading "#" of a hex color as a comment
-			`# msgColor: "${s.messageBgColor}"`,
-			`# msgPinColor: "${s.messagePinColor}"`,
-			`# msgFlashColor: "${s.messageFlashColor}"`,
-			`# msgReplyColor: "${s.messageReplyColor}"`,
-			`# msgBorderColor: "${s.messageBorderColor}"`,
 			"---",
 			""
 		].join("\n");
+	}
+
+	/* Writes every override key the note doesn't already have, with an empty value - which
+	   parses as null and so overrides nothing (see getFileOverrides). Their point is to exist:
+	   Obsidian only suggests a property name once it appears somewhere in the vault. */
+	async addOverrideProperties(file: TFile) {
+		let added = 0;
+
+		// typed here - the API hands the frontmatter over as `any`
+		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			for (const key of OVERRIDE_KEYS) {
+				if (key in fm) continue;	// keeps whatever the user already set
+				fm[key] = null;
+				added++;
+			}
+		});
+
+		new Notice(added === 0
+			? "This note already has every override property"
+			: `Added ${added} override ${added === 1 ? "property" : "properties"}`);
 	}
 
 	// the note only becomes a chat once metadataCache parses the new frontmatter, which

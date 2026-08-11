@@ -380,8 +380,8 @@ there to avoid an error in the embed-link plugin; it isn't arbitrary.
    `parsePixelOverride` so a bad value falls back instead of breaking.
 4. Consume it — visual settings in `applyStyles` (a CSS variable or a container class),
    plain values in `applyConfigToContext`.
-5. Document it in the README's override table, and consider adding it to the commented-out
-   block in `buildChatNoteFrontmatter`.
+5. Document it in the README's override table, and add its YAML alias to `OVERRIDE_KEYS` in
+   `settings.ts`, which is what the **Add override properties** command writes.
 
 `saveSettings` already re-resolves every file's config and refreshes open files, so nothing
 else has to be wired up.

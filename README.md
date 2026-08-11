@@ -31,11 +31,13 @@ To turn an existing note into a chat note, add this to its frontmatter (section 
 ```yaml
 ---
 type: chat-note
+author: Some Name
 ---
 ```
 
-`type: chat-note` is what the plugin looks for. Without it a note renders normally, and every
-message block in it stays a plain code block.
+`type: chat-note` is what the plugin looks for. Without it a note renders normally, and every message block in it stays a plain code block.
+
+> You can leave the author field blank or skip it entirely; however, this results in all messages being sent with an empty author attribute by default. If you simply do not wish to display the author, it is better to specify the author anyway and disable the display separately in the settings.
 
 ## Writing messages
 
@@ -69,6 +71,7 @@ No default hotkeys are set; you can assign your own under **Settings → Hotkeys
 | Focus chat input |
 | Scroll to bottom |
 | Scroll to top |
+| Add override properties |
 | Recalculate message ids |
 
 > You can still assign **Scroll to top** to `Mod` + `↑`. Just note that when the chat input is focused, the combination will open or close the author/time row instead.
@@ -99,6 +102,19 @@ msgCornerRadius: 20
 msgAuthorBadges: true
 ---
 ```
+
+### Adding the keys automatically
+
+You don't have to type any of this out. Run the **Add override properties** command in a chat
+note and every override key is added to its frontmatter with an empty value. An empty key
+changes nothing, so the note keeps using your global settings until you fill one in — think of
+it as a menu of what you can set.
+
+Keys the note already has are left untouched, values and all, so the command is safe to run
+again at any time; it only ever adds what is missing.
+
+> Running it **once in a vault** is also what teaches Obsidian's property autocomplete these
+> keys. After that, every key is suggested to you as you type in any note's properties, so you don't need to look them up.
 
 A few things to know:
 
