@@ -3,7 +3,7 @@
 	"name": "Chat Notes",
 	"version": "1.0.0",
 	"minAppVersion": "1.4.0",
-	"description": "Turn a note into a chat, where each message is its own block with an author and a timestamp.",
+	"description": "Turn Obsidian into a customizable messenger",
 	"author": "Luca Renner",
 	"authorUrl": "https://github.com/lucarenn",
 	"isDesktopOnly": false

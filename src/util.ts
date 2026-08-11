@@ -122,6 +122,14 @@ export function formatTimestamp(date: Date = new Date()): string {
 		+ ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/* A message body lives inside a four-backtick fence, so four or more backticks in the message
+	content close it early, therefore longer runs of backticks are shortened to 3. */
+export const MAX_CONTENT_BACKTICKS = 3;
+
+export function clampBackticks(content: string): string {
+	return content.replace(/`{4,}/g, "`".repeat(MAX_CONTENT_BACKTICKS));
+}
+
 export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
 	const preview = view.containerEl.querySelector(".markdown-preview-view");
 	const cmScroller = view.containerEl.querySelector(".cm-scroller");

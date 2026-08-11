@@ -1,7 +1,7 @@
 import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
 import { ConfirmDeleteModal } from "./modals"
 import { MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
-import { scrollDocument, isValidTimestamp, TIMESTAMP_PLACEHOLDER } from "./util"
+import { scrollDocument, isValidTimestamp, clampBackticks, TIMESTAMP_PLACEHOLDER } from "./util"
 import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky"
 import type ChatNotesPlugin from "./main";
 
@@ -199,7 +199,9 @@ export function createChatInput(plugin: ChatNotesPlugin) {
 		const file = plugin.currentFile;
 		if (!file) return;
 
-		const value = textarea.value.trim();
+		// clamped here rather than while typing: rewriting the textarea on every keystroke
+		// would eat the fourth backtick out from under someone still opening a code fence
+		const value = clampBackticks(textarea.value.trim());
 		if (!value) return;
 
 		// empty string -> undefined, so appendMessage falls back to the configured default
@@ -849,7 +851,9 @@ function createMessageActionsMenu({
 				saveBtn.addEventListener("click", () => {
 
 					void (async () => {
-						const newContent = textarea.value
+						// same fence guard the chat input applies on send - an edit writes to
+						// the file through the same block and breaks it the same way
+						const newContent = clampBackticks(textarea.value)
 
 						/* The header is taken from the file's own copy of the block, not from
 						   the message this menu was built for - so a header edited elsewhere

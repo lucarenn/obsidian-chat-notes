@@ -1,10 +1,10 @@
 # Chat Notes Plugin
 
 What does this plugin add?
-- This plugin adds chat notes to Obsidian. A chat note has an input field to write new messages and a system to render and display the messages. All other notes will still work just like normal.
+- This plugin adds chat notes, that behave just like you would expect from a messenger chat: they have an input field to write new messages and a system to render and display the messages. You can reply, pin, copy, edit, delete and much more. All other notes will still work just like normal.
 
 Why use this plugin?
-- This plugin was originally designed to export private Discord servers into Obsidian, however, it can be used independently. If you like a message-based note system, where it's easy to separate and see the timestamps of your ideas in the same file, then this plugin might be for you.
+- This plugin was originally designed to export private Discord servers into Obsidian, however, it can be used independently. If you like to draft dialogues or like a message-based note system, where it's easy to separate and see the timestamps of your ideas in the same file, then this plugin might be for you.
 
 # Installation
 
@@ -36,6 +36,15 @@ type: chat-note
 
 `type: chat-note` is what the plugin looks for. Without it a note renders normally, and every
 message block in it stays a plain code block.
+
+## Writing messages
+
+Messages are written in markdown and render as such, code blocks included.
+
+> **Backticks:** a message is stored inside a four-backtick block, so a longer run of backticks
+> inside a message would close it early and break the note. Runs of four or more backticks are
+> therefore shortened to three when you send or save a message. Regular ``` code blocks work as
+> usual.
 
 ## Shortcuts
 
