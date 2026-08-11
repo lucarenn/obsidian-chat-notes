@@ -248,7 +248,7 @@ badge and its tail are *siblings* of the bubble and would never inherit from it;
 to be a sibling because the bubble's own `overflow: hidden` (which clips the reply banner to
 its rounded silhouette) would cut it off.
 
-`chat-message-scroll-highlight` is the one remaining state *class* on the row, and it can be:
+`chat-message-scroll-flash` is the one remaining state *class* on the row, and it can be:
 it is transient (900 ms), so nothing has to survive an unmount. Everything durable is a data
 attribute or a generated rule, for the reason two entries below.
 

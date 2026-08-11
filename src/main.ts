@@ -341,7 +341,7 @@ export default class ChatNotesPlugin extends Plugin {
 					// every callback closes over THIS file, so a click in a background leaf
 					// acts on the message it belongs to rather than on whatever is focused
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
-					onHighlight: (targetId: string) => { void this.handleMessagePin(file, targetId); },
+					onPin: (targetId: string) => { void this.handleMessagePin(file, targetId); },
 					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
 					// callback for the reply banner; `origin` is the row it was clicked in
 					onScrollToReply: (targetId: string, origin: HTMLElement) => { void this.scrollToMessage(file, targetId, { origin }); }
@@ -359,10 +359,10 @@ export default class ChatNotesPlugin extends Plugin {
 					note.lastAppliedConfig = note.configCache;
 				}
 
-				// highlight message if its pinned - `row` and `config` are the ones for THIS
+				// recolour the message if its pinned - `row` and `config` are the ones for THIS
 				// file, not for whichever file happens to be focused
 				if (msg.header.extra.pinned === "true") {
-					this.applyMessageHighlightStyle(row, config, true)
+					this.applyMessagePinStyle(row, config, true)
 				}
 
 				/* Rendered under a child bound to THIS block, not under the plugin: anything
@@ -671,7 +671,7 @@ export default class ChatNotesPlugin extends Plugin {
 			`# msgCornerRadius: ${String(s.messageCornerRadius)}`,
 			// quoted, or YAML reads the leading "#" of a hex color as a comment
 			`# msgColor: "${s.messageBgColor}"`,
-			`# msgPinColor: "${s.messageHighlightColor}"`,
+			`# msgPinColor: "${s.messagePinColor}"`,
 			`# msgFlashColor: "${s.messageFlashColor}"`,
 			`# msgReplyColor: "${s.messageReplyColor}"`,
 			`# msgBorderColor: "${s.messageBorderColor}"`,
@@ -726,7 +726,7 @@ export default class ChatNotesPlugin extends Plugin {
 		// triggers - the click should feel immediate
 		const config = this.getConfigCache(file);
 		for (const row of findMessageRows(this.app, file, msgId)) {
-			this.applyMessageHighlightStyle(row, config, pinState);
+			this.applyMessagePinStyle(row, config, pinState);
 			// keeps the row's own flag in step, so the pinned-only filter reacts at once
 			row.dataset.pinned = String(pinState);
 		}
@@ -971,7 +971,7 @@ export default class ChatNotesPlugin extends Plugin {
 	async scrollToMessage(file: TFile, msgId: string, options?: {
 		behavior?: ScrollBehavior;
 		block?: ScrollLogicalPosition;
-		highlight?: boolean;
+		flash?: boolean;
 		origin?: HTMLElement;
 	}) {
 		const context = await this.getArchiveContext(file);
@@ -979,7 +979,7 @@ export default class ChatNotesPlugin extends Plugin {
 		/* The same message has a row in every place the file is rendered, and `isConnected`
 		   tells them apart not at all: the subview you are NOT in stays mounted, so once Live
 		   Preview has rendered, its rows are still in the document while you read. Picking one
-		   of those meant scrolling and flashing a hidden node - no scroll, no highlight, and a
+		   of those meant scrolling and flashing a hidden node - no scroll, no flash, and a
 		   1.5s wait for a rect that never became visible.
 
 		   So: only rows actually on the page, and - when the call came from a click - only the
@@ -1032,13 +1032,13 @@ export default class ChatNotesPlugin extends Plugin {
 			inline: "nearest",
 		});
 
-		// wait until scrolling has finished and then play the highlight animation
+		// wait until scrolling has finished and then play the flash animation
 		await this.waitUntilVisible(row);
 
-		if (options?.highlight ?? true) {
+		if (options?.flash ?? true) {
 			const target = row;
-			target.classList.add("chat-message-scroll-highlight");
-			setTimeout(() => target.classList.remove("chat-message-scroll-highlight"), 900);
+			target.classList.add("chat-message-scroll-flash");
+			setTimeout(() => target.classList.remove("chat-message-scroll-flash"), 900);
 		}
 
 		return true;
@@ -1247,7 +1247,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 				const pinned = message.header.extra.pinned === "true";
 				const color = pinned
-					? config.messageHighlightColor
+					? config.messagePinColor
 					: config.messageBgColor;
 
 				for (const row of rows) {
@@ -1278,13 +1278,13 @@ export default class ChatNotesPlugin extends Plugin {
 		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
 	}
 
-	/* Overrides the bubble colour for a highlighted (pinned) message. Takes the ROW, not the
+	/* Overrides the bubble colour for a pinned message. Takes the ROW, not the
 	   bubble: the speech-bubble tail is a sibling of the bubble (it has to be - see
 	   .chat-message's overflow:hidden) so a property set on the bubble would never reach it. */
-	applyMessageHighlightStyle(target: HTMLElement, config: ChatConfig, isPinned: boolean){
+	applyMessagePinStyle(target: HTMLElement, config: ChatConfig, isPinned: boolean){
 
 		const color = isPinned
-			? config.messageHighlightColor
+			? config.messagePinColor
 			: config.messageBgColor;
 
 		if (!color) return;

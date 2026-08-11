@@ -115,7 +115,7 @@ A few things to know:
 | --- | --- | --- |
 | `author` | text | *(YAML only)* The chat owner - who counts as "you" |
 | `msgColor` | color | Message background color |
-| `msgPinColor` | color | Message highlight color |
+| `msgPinColor` | color | Message pin color |
 | `msgFlashColor` | color | Message flash color |
 | `msgReplyColor` | color | Reply banner color |
 | `msgBorderColor` | color | Message border color |

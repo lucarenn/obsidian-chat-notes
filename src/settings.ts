@@ -21,7 +21,7 @@ export interface ChatConfig {
 	scrollOnSend?: boolean;
     messageCornerRadius?: number;
 	author?: string;
-	messageHighlightColor?: string;
+	messagePinColor?: string;
 	messageFlashColor?: string;
 	messageReplyColor?: string;
 	messageBorderColor?: string;
@@ -37,7 +37,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	showAuthorBadges: boolean;
 	scrollOnSend: boolean;
     messageCornerRadius: number;
-	messageHighlightColor: string;
+	messagePinColor: string;
 	messageFlashColor: string;
 	messageReplyColor: string;
 	messageBorderColor: string;
@@ -60,10 +60,10 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	showAuthorBadges: false,
 	scrollOnSend: false,
 	messageCornerRadius: 12,
-	messageHighlightColor: "#e0adf0",
-	messageFlashColor: "white",
-	messageReplyColor: "#57467e",
-	messageBorderColor: "#808080",
+	messagePinColor: "#ec4e52",
+	messageFlashColor: "#eff2f3",
+	messageReplyColor: "#e1e1ec",
+	messageBorderColor: "#444444",
 	inputMaxHeight: 200,
 	inputWidthOffset: 0,
 	defaultAuthorMode: "owner",
@@ -97,20 +97,20 @@ export class ChatNotesSettingTab extends PluginSettingTab {
             });
 
 		new Setting(containerEl)
-		.setName("Message highlight color")
-		.setDesc("Determines the background color of a highlighted/pinned message")
+		.setName("Message pin color")
+		.setDesc("Determines the background color of a pinned message")
 		.addColorPicker(color => {
 			color
-				.setValue(this.plugin.settings.messageHighlightColor)
+				.setValue(this.plugin.settings.messagePinColor)
 				.onChange(async (value) => {
-					this.plugin.settings.messageHighlightColor = value;
+					this.plugin.settings.messagePinColor = value;
 					await this.plugin.saveSettings();
 				});
 		});
 
 		new Setting(containerEl)
 		.setName("Message flash color")
-		.setDesc("Determines the color for the short flash highlighting when scrolling to a specific message")
+		.setDesc("Determines the color of the short flash played when scrolling to a specific message")
 		.addColorPicker(color => {
 			color
 				.setValue(this.plugin.settings.messageFlashColor)
@@ -322,7 +322,7 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		author: parseStringOverride(fm.author),		// the chat owner - yaml only, never a global setting
 		defaultAuthorMode,
 		messageBgColor: parseStringOverride(fm.msgColor),
-		messageHighlightColor: parseStringOverride(fm.msgPinColor),
+		messagePinColor: parseStringOverride(fm.msgPinColor),
 		messageFlashColor: parseStringOverride(fm.msgFlashColor),
 		messageReplyColor: parseStringOverride(fm.msgReplyColor),
 		messageBorderColor: parseStringOverride(fm.msgBorderColor),

@@ -125,7 +125,7 @@ export type CreateHTMLParams = {
 	author_text: string;
 	context: ArchiveContext;
 	onToggle: (menu: HTMLElement) => void;
-	onHighlight: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
+	onPin: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
 	onReplyToggle: (msgId: string) => void;
 	// `origin` is the row the banner was clicked in - the target is resolved in that same
 	// pane, never in a hidden subview or another leaf (see scrollToMessage)
@@ -139,7 +139,7 @@ export type CreateMenuParams = {
 	wrapper: HTMLElement;
 	content: HTMLDivElement;
 	onToggle: (menu: HTMLElement) => void;
-	onHighlight: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
+	onPin: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
 };
 
 

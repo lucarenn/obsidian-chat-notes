@@ -144,7 +144,7 @@
     word-break: break-word;
 }
 
-/* Scroll to message highlighting */  
+/* Scroll to message flash */
 .chat-message::after {
     content: "";
     position: absolute;
@@ -154,11 +154,11 @@
     opacity: 0;
 }
 
-.chat-message-row.chat-message-scroll-highlight > .chat-message::after {
-    animation: message-highlight 0.9s ease;
+.chat-message-row.chat-message-scroll-flash > .chat-message::after {
+    animation: message-flash 0.9s ease;
 }
 
-@keyframes message-highlight {
+@keyframes message-flash {
     0% {
         border: 5px solid var(--settings-msg-flash-color, white);
         background: transparent;
@@ -214,7 +214,7 @@
 }
 
 /* black or white, picked per bubble background in applyStyles (and per message in
-   applyMessageHighlightStyle, since a pinned bubble has its own color) */
+   applyMessagePinStyle, since a pinned bubble has its own color) */
 .msg-author {
     background: transparent !important;
     box-shadow: none !important;

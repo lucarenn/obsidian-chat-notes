@@ -368,7 +368,7 @@ export function removeChatViewActions(view: MarkdownView) {
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onHighlight, onReplyToggle, onScrollToReply} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReplyToggle, onScrollToReply} : CreateHTMLParams){
 
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
@@ -403,7 +403,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 		wrapper,
 		content,
 		onToggle,
-		onHighlight
+		onPin
 	});
 
 	/* Create message header and add menu buttons to header */
@@ -651,7 +651,7 @@ function createMessageActionsMenu({
 	wrapper,
 	content,
 	onToggle,
-	onHighlight
+	onPin
 } : CreateMenuParams) {
 
     const filePath = ctx.sourcePath;
@@ -698,7 +698,7 @@ function createMessageActionsMenu({
 	setIcon(favBtn, "pin");
 	favBtn.addEventListener("click", (e) => {
 		e.stopPropagation();
-		onHighlight(msg.header.id);
+		onPin(msg.header.id);
 	});
 
 	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
