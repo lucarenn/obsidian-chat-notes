@@ -221,23 +221,8 @@ export default class ChatNotesPlugin extends Plugin {
 		   Both firing for one switch (a tab change that is also a file change) is harmless -
 		   every step of onFileSwitch is idempotent, and the second pass restores the draft it
 		   just saved. */
-		const handleFileSwitch = () => {
-			// every open view, not just the active one: a background split can be showing a
-			// chat note too, and the one being left has to give its chat dressing back
-			this.syncChatViews();
-
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			const file = view?.file;
-			if (!view || !file) return;
-
-			this.updateFileConfig(file);
-			void this.onFileSwitch(file, view).catch(err => {
-				console.error("Failed to switch chat file", err);
-			});
-		};
-
-		this.registerEvent(this.app.workspace.on("active-leaf-change", handleFileSwitch));
-		this.registerEvent(this.app.workspace.on("file-open", handleFileSwitch));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.handleFileSwitch()));
+		this.registerEvent(this.app.workspace.on("file-open", () => this.handleFileSwitch()));
 
 		// workspace "resize" rather than window "resize": it also fires for sidebar and
 		// split changes, which resize the pane without resizing the window
@@ -407,7 +392,7 @@ export default class ChatNotesPlugin extends Plugin {
 		   without it currentFile stays null, and both save paths are gated on it - keystrokes
 		   on the first note of a session were cached nowhere. Positioning follows from the
 		   ResizeObserver onFileSwitch installs, as it does for every other switch. */
-		this.app.workspace.onLayoutReady(handleFileSwitch);
+		this.app.workspace.onLayoutReady(() => this.handleFileSwitch());
 	}
 
 	/* Obsidian reclaims none of this by itself: an element removed while focused fires no
@@ -447,6 +432,24 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	/* Event Helper Methods */
+
+	/* Everything a view needs when the file it shows changes - or when the file stops or starts
+	   being a chat note under it, which is the same problem. A method rather than a listener
+	   closure because refreshFile has to run it by hand: see there. */
+	handleFileSwitch() {
+		// every open view, not just the active one: a background split can be showing a
+		// chat note too, and the one being left has to give its chat dressing back
+		this.syncChatViews();
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const file = view?.file;
+		if (!view || !file) return;
+
+		this.updateFileConfig(file);
+		void this.onFileSwitch(file, view).catch(err => {
+			console.error("Failed to switch chat file", err);
+		});
+	}
 
 	async onFileSwitch(newFile: TFile, view: MarkdownView) {
 
@@ -643,6 +646,13 @@ export default class ChatNotesPlugin extends Plugin {
 
 			this.updateChatInputPosition(view);
 		}
+
+		/* Mounting the input is onFileSwitch's job, and only the editor branch above happens to
+		   provoke the event that runs it (rebuildView reloads the view; previewMode.rerender
+		   only redraws markdown). So a note that became a chat note while in reading view got
+		   no input, and one that stopped being a chat note kept it. Run it by hand instead of
+		   relying on which branch fired what - it is idempotent. */
+		this.handleFileSwitch();
 	}
 
 	/* Chat Note Creation */

@@ -165,6 +165,15 @@ signal), and anything that calls `updateFileConfig` and then applies the config 
 message as a CodeMirror block widget inside nested flex containers. Nearly every awkward
 piece of this codebase exists because something has to behave the same in both.
 
+**A rerender is not a file switch.** `refreshFile` rebuilds the view two different ways: reading
+mode gets `previewMode.rerender(true)`, the editor gets `leaf.rebuildView()`. Only the second
+reloads the view and so provokes `file-open` — and `onFileSwitch` is what mounts the chat input,
+hides it, and installs the ResizeObserver. Relying on that event meant a note that *became* a
+chat note while in reading view never got an input (and one that stopped being a chat note kept
+it), while the same edit in the editor worked instantly. `refreshFile` therefore calls
+`handleFileSwitch` itself; every step of it is idempotent, so the editor branch running it twice
+costs nothing.
+
 **`position: sticky` doesn't work** — it's fine in Reading View and inert in Live Preview.
 `sticky.ts` reimplements it by tracking scroll: one shared listener + `IntersectionObserver`
 per scroller, recomputing only rows currently on screen. The author badge uses that shared

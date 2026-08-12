@@ -1,5 +1,9 @@
 # Chat Notes Plugin
 
+A messenger plugin to write messages, chats and conversations inside obsidian.
+
+![plugin demo](/images/demo.gif)
+
 What does this plugin add?
 - This plugin adds chat notes, that behave just like you would expect from a messenger chat: they have an input field to write new messages and a system to render and display the messages. You can reply, pin, copy, edit, delete and much more. All other notes will still work just like normal.
 
