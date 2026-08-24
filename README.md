@@ -1,6 +1,6 @@
 # Chat Notes Plugin
 
-A messenger plugin to write messages, chats and conversations inside obsidian.
+A messenger plugin to write messages, chats and conversations inside Obsidian.
 
 ![plugin demo](/images/demo.gif)
 
@@ -12,7 +12,7 @@ Why use this plugin?
 
 # Installation
 
-Chat Notes is not in the community plugin store yet — it is awaiting review. Until then:
+Chat Notes is not in the community plugin store yet, it is awaiting review. Until then:
 
 **Manually**
 
@@ -67,7 +67,9 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 
 There are a handful of commands that make your life easier working with this plugin. 
 Every command except **Create new chat note** is only available inside a chat note.
-No default hotkeys are set; you can assign your own under **Settings → Hotkeys**. Having shortcuts to move the cursor into the input field or scroll to top/bottom makes it much faster working with chat files, without your hands leaving the keyboard.
+No default hotkeys are set, you can assign your own under **Settings → Hotkeys**. 
+Having shortcuts to move the cursor into the input field or scroll to top/bottom 
+makes it much faster working with chat files, without the hands having to leave the keyboard.
 
 | Command |
 | --- |
@@ -82,22 +84,24 @@ No default hotkeys are set; you can assign your own under **Settings → Hotkeys
 
 ### Repairing message ids
 
-Every message carries an `id` (which is also used by replies). Editing a note by hand can break that: duplicating a block, changing a number, pasting messages in from another chat. A duplicate id is especially bad: two messages claim the same number, and only one of them still responds to
+Every message has an `id` (which is also used by replies). An incorrect id might impair the functionality of some features. A duplicate id is especially bad: two messages claim the same number, and only one of them still responds to
 pin, edit and delete.
 
-**Recalculate message ids** repairs the open chat note. It asks for confirmation, then renumbers
+The **Recalculate message ids** command repairs the open chat note. It renumbers
 every message `1, 2, 3…` in the order they appear and rewrites every reply to match. A reply
-whose message is no longer in the file loses its link, since its old number would now belong to
-an unrelated message. It will report the count when the command finishes. Nothing else in the file is touched, and you can reverse the command with the editor's undo in one step.
-
+whose message is no longer in the file loses its link. You can reverse the command with the editor's undo in one step.
 The plugin also checks for duplicates when it first reads a chat note and notifies you if it finds any.
 
 ## Overriding global settings per chat note
 
 Global settings live under **Settings → Community plugins → Chat Notes**.
-Here many features like various colors, corner radius, visible attributes in the message header, input width and height, default author, ribbon icon visibility and more can be adjusted. By default these apply to *all* chat notes. If you want different settings for different chats, you can override most of the settings per file by adding the matching key to that note's frontmatter:
+Here many features like various colors, corner radius, visible attributes in the message header, 
+input width and height, default author, ribbon icon visibility and more can be adjusted. 
+By default these apply to *all* chat notes. If you want **different settings for individual chats**, 
+you can override most of the settings per file by adding the matching key to that note's frontmatter:
 
 ```yaml
+# Example:
 ---
 type: chat-note
 author: Alice
@@ -111,8 +115,7 @@ msgAuthorBadges: true
 
 You don't have to type any of this out. Run the **Add override properties** command in a chat
 note and every override key is added to its frontmatter with an empty value. An empty key
-changes nothing, so the note keeps using your global settings until you fill one in — think of
-it as a menu of what you can set.
+changes nothing, so the note keeps using your global settings until you fill one in.
 
 Keys the note already has are left untouched, values and all, so the command is safe to run
 again at any time; it only ever adds what is missing.
@@ -163,4 +166,5 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-In the future, additions like virtualized rendering, markdown message editing/writing and better plugin compatibility might be implemented.
+I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility
+in the future.
