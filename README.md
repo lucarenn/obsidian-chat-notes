@@ -10,7 +10,9 @@ What does this plugin add?
 Why use this plugin?
 - This plugin was originally designed to export private Discord servers into Obsidian, however, it can be used independently. If you like to draft dialogues or like a message-based note system, where it's easy to separate and see the timestamps of your ideas in the same file, then this plugin might be for you.
 
-# Installation
+    > Backup your data before importing (the plugin allows changing ids, deleting or modifying the data)
+
+## Installation
 
 Chat Notes is not in the community plugin store yet, it is awaiting review. Until then:
 
@@ -24,7 +26,6 @@ Chat Notes is not in the community plugin store yet, it is awaiting review. Unti
 
 Add `lucarenn/obsidian-chat-notes` as a beta plugin. BRAT installs it and keeps it up to date.
 
-# Usage
 
 ## Creating a chat note
 
@@ -65,9 +66,9 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 
 ## Commands
 
-There are a handful of commands that make your life easier working with this plugin. 
+There are a handful of commands that make your life easier working with this plugin.
 Every command except **Create new chat note** is only available inside a chat note.
-No default hotkeys are set, you can assign your own under **Settings → Hotkeys**. 
+No default hotkeys are set, you can assign your own under **Settings → Hotkeys**.
 Having shortcuts to move the cursor into the input field or scroll to top/bottom 
 makes it much faster working with chat files, without the hands having to leave the keyboard.
 
@@ -96,7 +97,7 @@ The plugin also checks for duplicates when it first reads a chat note and notifi
 
 Global settings live under **Settings → Community plugins → Chat Notes**.
 Here many features like various colors, corner radius, visible attributes in the message header, 
-input width and height, default author, ribbon icon visibility and more can be adjusted. 
+input width and height, default author, ribbon icon visibility and more can be adjusted.
 By default these apply to *all* chat notes. If you want **different settings for individual chats**, 
 you can override most of the settings per file by adding the matching key to that note's frontmatter:
 
@@ -136,7 +137,7 @@ A few things to know:
 
 | Key | Value | Overrides setting |
 | --- | --- | --- |
-| `author` | text | *(YAML only)* The chat owner - who counts as "you" |
+| `author` | text | *(YAML only)* The chat owner |
 | `msgColor` | color | Message background color |
 | `msgPinColor` | color | Message pin color |
 | `msgFlashColor` | color | Message flash color |
@@ -160,11 +161,12 @@ These have no per-note override and always apply everywhere:
 - Input field width offset
 - Max input field height
 
+## Privacy
+This plugin works **only locally inside your vault** and only imitates messenger behavior. It does not collect, share or upload any data. There is no functionality to actually send any messages to other devices, users or similar.
 
-# Development
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file format, and the non-obvious bits of the implementation.
+## Development
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file format, and non-obvious parts of the implementation.
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility
-in the future.
+I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility in the future. The plugin has not been tested on mobile yet.

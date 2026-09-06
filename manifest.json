@@ -2,9 +2,9 @@
 	"id": "chat-notes",
 	"name": "Chat Notes",
 	"version": "1.0.0",
-	"minAppVersion": "1.4.0",
-	"description": "Turn Obsidian into a customizable messenger",
+	"minAppVersion": "1.12.7",
+	"description": "Write messages, chats and conversations inside your notes",
 	"author": "Luca Renner",
 	"authorUrl": "https://github.com/lucarenn",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }
