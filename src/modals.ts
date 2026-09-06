@@ -20,7 +20,7 @@ export class ConfirmModal extends Modal {
     onOpen() {
         const { contentEl } = this;
 
-        contentEl.createEl("h3", { text: this.text.title });
+        this.setTitle(this.text.title);
 
         contentEl.createEl("p", { text: this.text.body });
 
