@@ -2,7 +2,7 @@ import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, Wor
 import { Header, Message, ChatNote, ArchiveContext } from "./types"
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings"
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, findMessageBlocks, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util"
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util"
 import { ConfirmModal } from "./modals"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
@@ -1569,12 +1569,9 @@ export default class ChatNotesPlugin extends Plugin {
 		return true;
 	}
 
-	/* Renumbers every message 1..N in file order and rewrites reply_to to match, repairing a
-	   file whose ids were broken by hand (duplicates, gaps, pasted blocks).
-
-	   Header lines are patched in place rather than round-tripped through Message.toString(),
-	   for the same reason toggleMessagePinned patches: re-serialising reorders header keys and
-	   renormalises the body, turning a renumber into a diff across every line of the file. */
+	/* Repairs a file whose ids were broken by hand (duplicates, gaps, pasted blocks). The
+	   renumber itself is `renumberMessageIds` in util.ts - pure, and covered by tests; what is
+	   left here is reading the text from the right place and writing it back. */
 	async recalculateMessageIds(file: TFile) {
 
 		if (!isChatFile(this.app, file)) return;
@@ -1586,73 +1583,14 @@ export default class ChatNotesPlugin extends Plugin {
 		const editor = view?.getMode() === "source" ? view.editor : undefined;
 		const text = editor ? editor.getValue() : await this.app.vault.read(file);
 
-		// every block, not the message map - a duplicated id keeps only one entry there
-		const blocks = findMessageBlocks(text);
-		if (blocks.length === 0) {
+		const result = renumberMessageIds(text);
+		if (!result) {
 			new Notice("No messages to renumber");
 			return;
 		}
 
-		// first occurrence wins, so a duplicated id resolves to the earlier of the two
-		const newIds = new Map<string, string>();
-		blocks.forEach((block, index) => {
-			if (!newIds.has(block.id)) newIds.set(block.id, String(index + 1));
-		});
-
-		const lines = text.split("\n");
-		let droppedReplies = 0;
-
-		// last block first, so the line numbers of the earlier ones stay valid
-		for (let i = blocks.length - 1; i >= 0; i--) {
-			const block = blocks[i];
-			if (!block) continue;
-
-			const blockLines = lines.slice(block.startLine, block.endLine + 1);
-			const headerEnd = blockLines.indexOf("~~~");
-			if (headerEnd === -1) continue;
-
-			// rebuilt rather than spliced in place, so dropping a line can't shift the ones
-			// still to be read. Header only: a body line may well start with "id:"
-			const header: string[] = [];
-
-			for (const raw of blockLines.slice(0, headerEnd)) {
-				// trimStart to match findMessageBlocks - if one accepted an indented key and
-				// the other didn't, that block would keep its old id and collide
-				const current = raw.trimStart();
-
-				if (current.startsWith("id:")) {
-					header.push(`id: ${String(i + 1)}`);
-					continue;
-				}
-
-				if (current.startsWith("reply_to:")) {
-					const target = newIds.get(current.slice("reply_to:".length).trim());
-
-					// the target is gone, and its old number would now name an unrelated
-					// message, since the ids below are 1..N
-					if (target === undefined) {
-						droppedReplies += 1;
-						continue;
-					}
-
-					header.push(`reply_to: ${target}`);
-					continue;
-				}
-
-				header.push(raw);
-			}
-
-			lines.splice(
-				block.startLine,
-				block.endLine - block.startLine + 1,
-				...header,
-				...blockLines.slice(headerEnd)
-			);
-		}
-
+		const { lines, firstBlockLine, blockCount, newIds, droppedReplies } = result;
 		const updated = lines.join("\n");
-		const firstBlock = blocks[0];
-		if (!firstBlock) return;
 
 		// model first, then the write - see withMessageBlock
 		this.invalidateArchiveContext(file, updated);
@@ -1665,10 +1603,10 @@ export default class ChatNotesPlugin extends Plugin {
 			/* From the first block to the end of the document, so the frontmatter above it is
 			   never rewritten. Not to the last block's endLine: dropping a reply_to line
 			   changes the line count, so those numbers no longer describe the patched text. */
-			const span = lines.slice(firstBlock.startLine).join("\n");
+			const span = lines.slice(firstBlockLine).join("\n");
 			cm.replaceRange(
 				span,
-				{ line: firstBlock.startLine, ch: 0 },
+				{ line: firstBlockLine, ch: 0 },
 				{ line: cm.lastLine(), ch: cm.getLine(cm.lastLine()).length }
 			);
 
@@ -1680,8 +1618,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 		new Notice(
 			droppedReplies === 0
-				? `Renumbered ${String(blocks.length)} messages`
-				: `Renumbered ${String(blocks.length)} messages, dropped ${String(droppedReplies)} reply link(s) with no target`
+				? `Renumbered ${String(blockCount)} messages`
+				: `Renumbered ${String(blockCount)} messages, dropped ${String(droppedReplies)} reply link(s) with no target`
 		);
 	}
 

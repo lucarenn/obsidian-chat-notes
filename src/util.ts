@@ -282,6 +282,97 @@ export function findMessageBlocks(source: string): MessageBlock[] {
 	return blocks;
 }
 
+export interface RenumberResult {
+	lines: string[];		// the whole document, renumbered
+	firstBlockLine: number;	// the write starts here, so the frontmatter is never rewritten
+	blockCount: number;
+	newIds: Map<string, string>;	// old id -> new id, for the pending reply target
+	droppedReplies: number;
+}
+
+/* The renumber itself: every message gets its position in the file as its id, and every
+   reply_to is rewritten to match. Pure, and separated from recalculateMessageIds for that
+   reason - it is the one transform in the plugin that rewrites a whole user file at once, so
+   it is the one that most needs to be testable without a vault behind it.
+
+   Header lines are patched in place rather than round-tripped through Message.toString(), for
+   the same reason toggleMessagePinned patches: re-serialising reorders header keys and
+   renormalises the body, turning a renumber into a diff across every line of the file.
+
+   Returns undefined for a file with no message blocks, which is the caller's cue to say so. */
+export function renumberMessageIds(text: string): RenumberResult | undefined {
+
+	// every block, not the message map - a duplicated id keeps only one entry there
+	const blocks = findMessageBlocks(text);
+	const firstBlock = blocks[0];
+	if (!firstBlock) return undefined;
+
+	// first occurrence wins, so a duplicated id resolves to the earlier of the two
+	const newIds = new Map<string, string>();
+	blocks.forEach((block, index) => {
+		if (!newIds.has(block.id)) newIds.set(block.id, String(index + 1));
+	});
+
+	const lines = text.split("\n");
+	let droppedReplies = 0;
+
+	// last block first, so the line numbers of the earlier ones stay valid
+	for (let i = blocks.length - 1; i >= 0; i--) {
+		const block = blocks[i];
+		if (!block) continue;
+
+		const blockLines = lines.slice(block.startLine, block.endLine + 1);
+		const headerEnd = blockLines.indexOf("~~~");
+		if (headerEnd === -1) continue;
+
+		// rebuilt rather than spliced in place, so dropping a line can't shift the ones
+		// still to be read. Header only: a body line may well start with "id:"
+		const header: string[] = [];
+
+		for (const raw of blockLines.slice(0, headerEnd)) {
+			// trimStart to match findMessageBlocks - if one accepted an indented key and
+			// the other didn't, that block would keep its old id and collide
+			const current = raw.trimStart();
+
+			if (current.startsWith("id:")) {
+				header.push(`id: ${String(i + 1)}`);
+				continue;
+			}
+
+			if (current.startsWith("reply_to:")) {
+				const target = newIds.get(current.slice("reply_to:".length).trim());
+
+				// the target is gone, and its old number would now name an unrelated
+				// message, since the ids below are 1..N
+				if (target === undefined) {
+					droppedReplies += 1;
+					continue;
+				}
+
+				header.push(`reply_to: ${target}`);
+				continue;
+			}
+
+			header.push(raw);
+		}
+
+		lines.splice(
+			block.startLine,
+			block.endLine - block.startLine + 1,
+			...header,
+			...blockLines.slice(headerEnd)
+		);
+	}
+
+	return {
+		lines,
+		firstBlockLine: firstBlock.startLine,
+		blockCount: blocks.length,
+		newIds,
+		droppedReplies
+	};
+}
+
 /* Every html container the file is currently rendered in - one per open leaf. Flat and
    deduped: previewMode's container lives *inside* contentEl, so keeping both would find
    every message row twice, which is harmless for setting a CSS variable but not for a

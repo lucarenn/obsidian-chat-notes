@@ -12,6 +12,7 @@ npm install
 npm run dev     # esbuild watch -> main.js
 npm run build   # tsc -noEmit + production bundle
 npm run lint
+npm test        # vitest, the file-format layer (npm run test:watch to iterate)
 ```
 
 Shipped artifacts are `main.js`, `manifest.json` and `styles.css` — nothing else is read at
@@ -49,6 +50,33 @@ The message body, rendered as markdown.
   `Number(maxId) + 1` would silently reuse or skip an id. `compareNumericIds` /
   `incrementNumericId` in `util.ts` do the arithmetic digit by digit.
 
+## Tests
+
+`npm test` (vitest) covers the **file-format layer only** — the code that turns a user's note into
+messages and back. That scope is deliberate: the plugin rewrites files the user cannot easily
+reconstruct, so the functions worth pinning down are the ones whose bugs are silent and
+destructive, not the ones whose bugs are visible on screen.
+
+| File | Covers |
+| --- | --- |
+| `tests/message-format.test.ts` | `Message` / `Header` round-trip, blank-line preservation, header key order, `parseMessages`, `findMessageBlocks` |
+| `tests/numeric-ids.test.ts` | `compareNumericIds` / `incrementNumericId` at 19-digit snowflake length |
+| `tests/renumber.test.ts` | `renumberMessageIds` — the 1..N rewrite, `reply_to` remapping, duplicates |
+| `tests/fixtures.ts` | `block()` / `note()` builders for chat-note text |
+
+Two things to know before adding to them:
+
+- **`tests/stubs/obsidian.ts` is not a mock.** The `obsidian` package is types-only (`"main": ""`),
+  so a runtime `import { MarkdownView } from "obsidian"` has nothing to resolve to outside the app;
+  `vitest.config.ts` aliases the module to that stub purely so `util.ts` and `types.ts` can be
+  imported. Nothing under test calls into it. **If a test needs one of those classes to behave,
+  the function is not part of the format layer** and belongs behind a different seam — extract the
+  pure half, the way `renumberMessageIds` was extracted from `recalculateMessageIds`.
+- **Assert on exact text, not on "contains".** Round-trip stability is the property the write path
+  depends on (`withMessageBlock` rewrites blocks in place), so the tests compare whole blocks byte
+  for byte. A looser assertion would pass while the file quietly gained or lost a blank line on
+  every edit.
+
 ## Source layout
 
 | File | Contains |
@@ -61,6 +89,7 @@ The message body, rendered as markdown.
 | `sticky.ts` | Manual `position: sticky` for gutter elements (see quirks) |
 | `modals.ts` | Delete-confirmation modal |
 | `styles.css` | All styling; consumes the `--settings-*` custom properties set from `main.ts` |
+| `tests/` | Vitest coverage of the file-format layer (see below) |
 
 ## How a chat note renders
 
@@ -351,8 +380,12 @@ also what lets `Mod+Up` mean "open the header row" here while whatever the user 
 to globally still works everywhere else. The commands themselves ship **no default hotkeys**,
 per Obsidian's guidelines — don't add any back.
 
-**The renumber scans blocks, it does not use the message map.** `recalculateMessageIds` is the
-repair path for a file whose ids were broken by hand, and the commonest break is a duplicate —
+**The renumber scans blocks, it does not use the message map.** The transform itself is
+`renumberMessageIds` in `util.ts` — pure, and the one function in the plugin that rewrites a whole
+user file at once, which is why it is separated from the Obsidian I/O around it and covered by
+tests. `recalculateMessageIds` in `main.ts` is what remains: read the text from the editor or the
+vault, hand it over, write the result back. It is the repair path for a file whose ids were broken
+by hand, and the commonest break is a duplicate —
 which `parseMessages` cannot represent, since its map keeps one entry per id and the other block
 vanishes. So it uses `findMessageBlocks`, which returns every block in file order, duplicates
 included. The two read the id differently for the same reason: `extractMessageIdFromSource`
