@@ -717,8 +717,7 @@ function createMessageActionsMenu({
 	   real timer handle: clearing Number(msg.header.id) cancelled whatever unrelated timer the
 	   browser had handed that same small integer to.
 
-	   Not routed through the plugin's `later`, unlike the timers in main.ts: this one only sets
-	   an icon on its own button, which is detached by the time an unload could matter. */
+	   Not routed through the plugin's `later`: this one only sets an icon on its own button. */
 	let resetTimer: number | undefined;
 
     copyBtn.addEventListener("click", () => {

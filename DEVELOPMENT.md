@@ -201,6 +201,35 @@ signal), and anything that calls `updateFileConfig` and then applies the config 
 message as a CodeMirror block widget inside nested flex containers. Nearly every awkward
 piece of this codebase exists because something has to behave the same in both.
 
+**And more than one window.** A popout window is a separate `window` with its own `document`,
+so the module-level `window` / `document` globals mean *the main window*, not "the one this
+element is in". Obsidian gives every node its own pointers, `el.win` and `el.doc` (and, where
+there is no node to ask, the `activeWindow` / `activeDocument` globals), and everything here that
+observes, listens or measures goes through them: `setupResizeObserver` builds its
+`ResizeObserver` from `el.win` (an observer
+only delivers callbacks from the rendering lifecycle of the window it was constructed in, so a
+main-window one never fires for a resized popout), `sticky.ts` and `attachStickyReplyIcon` bind
+their resize listeners to the scroller's window, and `waitUntilVisible` measures against
+`element.win.innerHeight`. Both keep the window they registered with rather than reading it back
+at teardown — a *detached* node reports the global window, which would remove the listener from
+the wrong one. Frame ids are per window too, so a pending `requestAnimationFrame` is cancelled
+through the window that scheduled it (`cancelResizeFrame` holds a closure, not an id).
+
+Two things are known **not** to be a problem, both verified by hand: a runtime `<style>` element
+appended to the main document (`refreshReplyTargetStyle`) *is* mirrored into popouts by Obsidian,
+and building DOM with the main document's `createElement` is fine, since `appendChild` adopts a
+node across documents.
+
+**Dragging a tab into another window fires no file event.** "Open in new window" opens the file
+in a *new leaf*, so `file-open` → `handleFileSwitch` → `onFileSwitch` rebuilds everything for the
+new window. Dragging a tab out instead **moves the existing leaf**: the file never changes, so
+`file-open` doesn't fire, and the leaf object doesn't change either. `layout-change` does fire,
+but it only repositions — it does not re-run the switch, so the resize observer stayed bound to
+the window the view had just left, and a dragged-out tab lagged where "Open in new window" was
+fine. `setupResizeObserver` therefore registers `el.onWindowMigrated`, Obsidian's own signal for
+the move, which fires *after* the node is in its new window (when `el.win` is finally right) and
+returns a destroy function the next registration calls.
+
 **A rerender is not a file switch.** `refreshFile` rebuilds the view two different ways: reading
 mode gets `previewMode.rerender(true)`, the editor gets `leaf.rebuildView()`. Only the second
 reloads the view and so provokes `file-open` — and `onFileSwitch` is what mounts the chat input,
@@ -371,6 +400,15 @@ that keeps this honest: it toggles `chat-note-view` on each view's `contentEl` a
 for every open view, and pops the input's keymap `Scope` — a `Scope` left pushed keeps
 swallowing `Mod+Enter` for the rest of the session, and the blur handler can't be relied on to
 pop it, because removing a *focused* element from the DOM fires no blur.
+
+Pending timers are the same problem in time rather than space, so anything that reaches back
+into the plugin is scheduled through `later()` and cancelled in `onunload` — `scheduleRefresh`
+being the one that matters, since its rerender ends in `handleFileSwitch` and would remount the
+chat input, keymap scopes and all, against a plugin that is gone. The `requestAnimationFrame`
+loops (`scrollToBottomAfterSend`, the resize coalescing) keep their handles for the same reason.
+Timers that only touch their own element — the copy button's icon reset, the header row's
+`focusout` tick, both in `ui.ts` — are deliberately left alone: that element is detached by the
+time they fire.
 
 **Styling that reaches Obsidian's own note elements lives under `.chat-note-view`.** Note
 background, the bottom padding that clears the chat input, embed spacing — unscoped, these
