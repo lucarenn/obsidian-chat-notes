@@ -4,16 +4,13 @@ import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
 import ChatNotesPlugin from "./main"
 
 
-/* A parsed chat file: everything derivable from its text, and nothing else.
+/* A parsed chat file: everything derivable from its text, and nothing else. No DOM references,
+   no UI state - it is replaced whenever the file changes (see invalidateArchiveContext), so
+   anything that must outlive an edit belongs on ChatNote instead.
 
-   Deliberately holds no DOM references and no UI state. It is disposable - dropped whenever
-   the file changes and rebuilt lazily on the next render (see invalidateArchiveContext in
-   main.ts) - so anything that must outlive a file edit belongs on ChatNote instead, and
-   anything that describes the rendered page is found by querying the DOM.
-
-   Nothing mutates a context after construction except applyConfigToContext. That invariant
-   is what makes "throw it away and reparse" safe: a caller holding an older context across
-   an await sees a consistent snapshot rather than a half-updated one. */
+   Nothing mutates a context after construction except applyConfigToContext. That invariant is
+   what makes "throw it away and reparse" safe: a caller holding an older context across an await
+   sees a consistent snapshot rather than a half-updated one. */
 export class ArchiveContext {
     file: TFile;
 	messageMap: Map<string, MessageEntry>
@@ -108,12 +105,10 @@ export interface MessageEntry {
 	id: string;
 	message: Message;
 
-	/* Where the block sat in the text this entry was parsed from. A scroll hint only - use
-	   it to jump an unrendered message into view, NEVER to write to the file. Any edit
-	   anywhere above a message shifts it, and the context can lag the file by one metadata
-	   debounce, so a write keyed off these numbers can land in a different message's header.
-	   Writes locate the block by id in the text they are about to modify (see
-	   withMessageBlock in main.ts). */
+	/* Where the block sat in the text this entry was parsed from. A scroll hint only - use it to
+	   jump an unrendered message into view, NEVER to write to the file: any edit above a message
+	   shifts it, and the model can lag the file by a metadata debounce. Writes locate the block
+	   by id in the text they are about to modify (see withMessageBlock in main.ts). */
 	startLine: number;
 	endLine: number;
 }
@@ -250,7 +245,7 @@ export class Message {
 
 /* Per-file UI state, held in a WeakMap keyed by TFile (see main.ts). Distinct from
    ArchiveContext in lifetime: this is what the user did, not what the file says, so it must
-   survive a context rebuild - which now happens on every save - and a rename. */
+   survive a context rebuild (every save) and a rename. */
 export class ChatNote {
 	constructor(
 		public file: TFile,

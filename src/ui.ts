@@ -706,10 +706,9 @@ function createMessageActionsMenu({
 
     /* ---------------- COPY ---------------- */
 
-	/* Outside the handler, so a second copy actually cancels the first button's pending
-	   reset. This used to clear Number(msg.header.id) - a message id, not a timer handle,
-	   and small ids collide with the small sequential integers the browser hands out, so it
-	   could cancel an unrelated timer belonging to Obsidian or another plugin. */
+	/* Outside the handler, so a second copy cancels the first button's pending reset - and a
+	   real timer handle: clearing Number(msg.header.id) cancelled whatever unrelated timer the
+	   browser had handed that same small integer to. */
 	let resetTimer: number | undefined;
 
     copyBtn.addEventListener("click", () => {
@@ -780,7 +779,6 @@ function createMessageActionsMenu({
 		void (async () => {
 				e.stopPropagation();
 
-				// return if this editor is currently already open
 				if (plugin.activeEditor?.container === content.firstChild) {
 					return;
 				}
@@ -815,26 +813,23 @@ function createMessageActionsMenu({
 				editorWrapper.className = "msg-editor-wrapper";
 				editorWrapper.append(textarea, btnRow)
 
-				// Cancel editor changes
 				const restore = () => {
 					content.empty();
 					content.appendChild(originalContent);
 					plugin.clearActiveEditor({ container: editorWrapper });
 				};
 
-				// Cancel current editor first
+				// closes whichever editor was open before this one
 				plugin.handleOpenEditor({
 					container: editorWrapper,
 					restore
 				});
 
-				// Switch UI
 				const originalContent = content.cloneNode(true);
 				content.empty();
 				content.appendChild(editorWrapper);
 				textarea.focus();
 
-				/* Auto resize the editor depending of the amount of content*/
 				const autoResize = () => {
 					textarea.setCssStyles({ height: "auto" });
 					textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
@@ -842,12 +837,10 @@ function createMessageActionsMenu({
 				textarea.addEventListener("input", autoResize);
 				autoResize();
 
-				// Cancel Action
 				cancelBtn.addEventListener("click", () => {
 					restore();
 				});
 
-				// Save Action
 				saveBtn.addEventListener("click", () => {
 
 					void (async () => {
@@ -868,7 +861,8 @@ function createMessageActionsMenu({
 								.split("\n")
 						);
 
-						// instant UI update
+						// re-rendered here rather than left to the write's own re-render, so the
+						// bubble updates the moment Save is pressed
 						content.empty();
 
 						// bound to this block, not to the plugin - see the processor in main.ts
@@ -883,7 +877,6 @@ function createMessageActionsMenu({
 							renderChild
 						);
 
-						// clear the active editor
 						plugin.clearActiveEditor({ container: editorWrapper });
 					})();
 

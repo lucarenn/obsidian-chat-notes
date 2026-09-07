@@ -291,13 +291,12 @@ export interface RenumberResult {
 }
 
 /* The renumber itself: every message gets its position in the file as its id, and every
-   reply_to is rewritten to match. Pure, and separated from recalculateMessageIds for that
-   reason - it is the one transform in the plugin that rewrites a whole user file at once, so
-   it is the one that most needs to be testable without a vault behind it.
+   reply_to is rewritten to match. Kept pure and out of recalculateMessageIds because it is the
+   one transform that rewrites a whole user file at once - so it is the one that most needs to be
+   testable without a vault behind it.
 
-   Header lines are patched in place rather than round-tripped through Message.toString(), for
-   the same reason toggleMessagePinned patches: re-serialising reorders header keys and
-   renormalises the body, turning a renumber into a diff across every line of the file.
+   Header lines are patched in place, not round-tripped through Message.toString(): re-serialising
+   reorders header keys and renormalises bodies, turning a renumber into a whole-file diff.
 
    Returns undefined for a file with no message blocks, which is the caller's cue to say so. */
 export function renumberMessageIds(text: string): RenumberResult | undefined {
@@ -373,11 +372,9 @@ export function renumberMessageIds(text: string): RenumberResult | undefined {
 	};
 }
 
-/* Every html container the file is currently rendered in - one per open leaf. Flat and
-   deduped: previewMode's container lives *inside* contentEl, so keeping both would find
-   every message row twice, which is harmless for setting a CSS variable but not for a
-   measure-and-animate pass. Always an array, so "not open anywhere" is an empty loop
-   rather than a branch at every call site. */
+/* Every html container the file is currently rendered in - one per open leaf. Deduped, since
+   previewMode's container lives *inside* contentEl and keeping both would find every row twice.
+   Always an array, so "not open anywhere" is an empty loop rather than a branch. */
 export function getActiveContainers(app: App, file: TAbstractFile): HTMLElement[] {
 
 	const leaves = app.workspace.getLeavesOfType("markdown");
@@ -407,18 +404,15 @@ export function getActiveContainers(app: App, file: TAbstractFile): HTMLElement[
 	return containers;
 }
 
-/* The rendered rows of a chat file, found by querying the DOM rather than by remembering
-   nodes. A message has one row per place it is rendered (reading view and live preview are
-   both mounted, the same note can be open in several leaves), and rows come and go as the
-   view scrolls - so a stored reference is stale as soon as anything re-renders, while a
-   query is right by construction.
+/* The rendered rows of a chat file, found by querying rather than by remembering nodes. A
+   message has one row per place it is rendered, and rows come and go as the view scrolls, so a
+   stored reference goes stale while a query is right by construction.
 
-   Searched from the document down, NOT from the leaf containers a file is open in. Obsidian
-   renders chat blocks in more places than those - embeds, hover popovers, canvas cards,
-   popout windows - and a sweep that misses one leaves a stray row behind (the pin filter
-   hiding only some of the messages was exactly this). `data-chat-src` is what keeps a
-   document-wide search correct: it pins each row to the note that owns it, so an embedded
-   chat's rows never answer for the host's ids. */
+   Searched from the document down, NOT from the leaf containers the file is open in: Obsidian
+   renders chat blocks in more places than those (embeds, hover popovers, canvas cards, popout
+   windows) and a sweep that misses one leaves a stray row behind. `data-chat-src` is what keeps
+   that correct - it pins each row to the note that owns it, so an embedded chat's rows never
+   answer for the host's ids. */
 function rowsFor(app: App, sourcePath: string, msgId?: string): HTMLElement[] {
 	const selector = msgId === undefined
 		? `.chat-message-row[data-msg-id][data-chat-src="${CSS.escape(sourcePath)}"]`
