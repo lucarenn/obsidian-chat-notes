@@ -1,7 +1,15 @@
 
 /* Structural defaults only. Everything user-configurable arrives at runtime as a
    --settings-* property (see applyStyles in main.ts); the values below are the fallbacks
-   used before that runs. */
+   used before that runs.
+
+   THE RULE THAT SHAPES THIS FILE: three things below that look like they should be a class
+   toggled on the row by JS - the reply outline, the pinned-only filter, the pinned colour -
+   are attribute rules instead. Live Preview unmounts a block that scrolls far off screen and
+   re-inserts the DOM it cached without re-running the codeblock processor, so anything a
+   sweep writes onto a row comes back stale, and a row unmounted while the sweep ran is never
+   touched at all. A rule keyed on an attribute the row carries from render applies to
+   whatever is mounted, whenever it mounts. */
 :root {
     --msg-pad-x: 22px;
     --msg-pad-top: 5px;
@@ -62,44 +70,26 @@
 
 /* Outline around the message the pending reply targets, and the reply button kept visible on
    it. WHICH row that is comes from a rule the plugin generates at runtime
-   (refreshReplyTargetStyle in main.ts); all it does is set the custom properties below on the
-   matching row.
-
-   A generated rule rather than a class on the node, for the same reason the pinned-only
-   filter is a container class: Live Preview unmounts off-screen blocks and re-inserts the DOM
-   it cached, so a class put there by hand comes back stale (the old target kept its outline)
-   and a row that was unmounted when the target changed never got one. A rule matches whatever
-   is mounted, whenever it mounts, so nothing has to touch the row at all. */
+   (refreshReplyTargetStyle in main.ts), which does nothing but set the custom properties below
+   on the matching row - generated rather than a class, per the note at the top of this file. */
 .chat-message-row > .chat-message {
     outline: var(--msg-reply-outline, none);
     outline-offset: 2px;
 }
 
-/* Pinned-only filter: one class on the container, plus the data-pinned flag every row
-   carries from render (see createElementsHTML).
-
-   Deliberately not a class toggled on each row by a sweep. Live Preview unmounts blocks that
-   scroll far off screen and re-inserts the cached DOM when they scroll back, without
-   re-running the codeblock processor - so a swept row returned unfiltered, and a row that
-   was unmounted during the sweep was never touched at all. A container rule needs no sweep:
-   it applies to whatever happens to be mounted, whenever it mounts.
-
-   Hides the row, so the bubble's siblings (reply button, author badge) go with it instead of
-   floating beside an invisible message. */
+/* Pinned-only filter: one class on the container, plus the data-pinned flag every row carries
+   from render (see createElementsHTML). Hides the row, so the bubble's siblings (reply button,
+   author badge) go with it instead of floating beside an invisible message. */
 .msg-pinned-only .chat-message-row:not([data-pinned="true"]) {
     display: none !important;
 }
 
-/* A pinned message is the same bubble in a different colour, so it swaps the two properties
-   the whole row is built from rather than restating any of the rules that consume them - the
-   bubble, its tail, the author badge and the action icons all follow. Redefined on the ROW,
-   not on .chat-message: the tail is a sibling of the bubble (it has to be, see the
-   overflow:hidden above), so a property set on the bubble would never reach it.
-
-   Set from data-pinned, and from a container property (--settings-msg-pin-color, written by
-   applyStyles) rather than per row by JS, for the reason given in the two blocks above: the
-   colour then applies to whatever is mounted, whenever it mounts. The fallbacks are the
-   defaults from settings.ts, and the contrast pick getReadableTextColor makes for them. */
+/* A pinned message is the same bubble in a different colour, so it swaps the two properties the
+   whole row is built from rather than restating the rules that consume them - bubble, tail,
+   badge and action icons all follow. Redefined on the ROW, not on .chat-message: the tail is a
+   sibling of the bubble (it has to be, see the overflow:hidden above), so a property set on the
+   bubble would never reach it. Fallbacks are the defaults from settings.ts and the contrast
+   pick getReadableTextColor makes for them. */
 .chat-message-row[data-pinned="true"] {
     --settings-msg-bg-color: var(--settings-msg-pin-color, #ec4e52);
     --settings-msg-text-color: var(--settings-msg-pin-text-color, #f5f5f5);
@@ -138,12 +128,11 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 
-    /* Rendered markdown sits on the bubble's background, so it takes the same contrast
-       pick as the header. Driven through Obsidian's own text tokens rather than element
-       selectors: custom properties are substituted per element, so a theme's
-       `--h1-color: var(--text-normal)` resolves against the value overridden here and
-       whatever the renderer emits follows. Anything painting its own background (code
-       blocks, links) uses its own token and is deliberately left alone. */
+    /* Rendered markdown sits on the bubble's background, so it takes the same contrast pick as
+       the header - driven through Obsidian's own text tokens rather than element selectors, so
+       a theme's `--h1-color: var(--text-normal)` resolves against the value overridden here and
+       whatever the renderer emits follows. Anything painting its own background (code blocks,
+       links) uses its own token and is deliberately left alone. */
     color: var(--settings-msg-text-color, currentColor);
     --text-normal: var(--settings-msg-text-color, currentColor);
 

@@ -94,7 +94,6 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async onload() {
 
-		// load global settings
 		await this.loadSettings();
 
 		this.addCommand({
@@ -210,17 +209,10 @@ export default class ChatNotesPlugin extends Plugin {
 		/* on FILE SWITCH: move the chat input to the view showing the file, and swap the draft
 		   it holds for that file's own.
 
-		   Two events, because neither covers the other. "active-leaf-change" fires when the
-		   focused tab or pane changes - including to another leaf showing the SAME file, which
-		   the single input element still has to move to. "file-open" fires when the file inside
-		   a leaf changes: opening a note in the current tab keeps the leaf, so nothing else
-		   announces it, and the input would go on showing the previous file's draft while
-		   caching keystrokes against it. It also covers the file already open when the plugin
-		   loads, which no leaf change announces.
-
-		   Both firing for one switch (a tab change that is also a file change) is harmless -
-		   every step of onFileSwitch is idempotent, and the second pass restores the draft it
-		   just saved. */
+		   Neither event covers the other: "active-leaf-change" catches a move to another leaf
+		   showing the SAME file, "file-open" catches a new file inside the same leaf (and the
+		   file already open at load). Both firing for one switch is harmless - every step of
+		   onFileSwitch is idempotent. */
 		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.handleFileSwitch()));
 		this.registerEvent(this.app.workspace.on("file-open", () => this.handleFileSwitch()));
 
@@ -231,10 +223,8 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 
 		/* The only event that fires on a reading <-> live preview switch, or when a view is
-		   rebuilt in place (e.g. by a refresh plugin). active-leaf-change doesn't fire - the
-		   leaf never changes - and the ResizeObserver watches contentEl, which keeps its size
-		   across the switch. Without this the input keeps whatever geometry it measured in
-		   the previous mode. */
+		   rebuilt in place: the leaf never changes, so active-leaf-change doesn't fire, and
+		   contentEl keeps its size, so the ResizeObserver doesn't either. */
 		this.registerEvent(
 			this.app.workspace.on("layout-change", () => {
 				// a rebuilt view keeps its element but not necessarily our class on it
@@ -302,11 +292,10 @@ export default class ChatNotesPlugin extends Plugin {
 				const note = this.getChatNote(file);
 				const config = this.getConfigCache(file);
 
-				/* The block's own text is right here, so a message the parse hasn't seen -
-				   typed by hand, pasted, or appended a moment ago - is read straight from
-				   `source` instead of forcing a reparse. Live Preview re-runs this callback
-				   on every keystroke while a block is being typed, so throwing (or
-				   rebuilding) on an unknown id fired once per character. */
+				/* A message the parse hasn't seen yet - typed by hand, pasted, or appended a
+				   moment ago - is read straight from `source` rather than forcing a reparse.
+				   Live Preview re-runs this callback on every keystroke while a block is being
+				   typed, so throwing on an unknown id fired once per character. */
 				let msg: Message;
 				try {
 					const id = extractMessageIdFromSource(source);
@@ -335,7 +324,6 @@ export default class ChatNotesPlugin extends Plugin {
 					return;
 				}
 
-				// Create HTML structure for message
 				const {content, row} = createElementsHTML({
 					plugin: this,
 					ctx,
@@ -356,16 +344,12 @@ export default class ChatNotesPlugin extends Plugin {
 				el.appendChild(row);
 
 
-				// apply the config styles to all html containers of the file (cascades down to every individual message)
-				// apply them only if a new config is present. Later rendered messages will still use the container variables set by earlier messages
+				// only when the config actually changed - every later message inherits the
+				// container properties the first one applied
 				if (note.lastAppliedConfig !== note.configCache) {
 					await this.applyConfigToFile(file);
 					note.lastAppliedConfig = note.configCache;
 				}
-
-				// nothing to do for a pinned message either: the row carries data-pinned from
-				// createElementsHTML, and the container holds both colours, so CSS picks the
-				// pinned one on mount (see applyStyles)
 
 				/* Rendered under a child bound to THIS block, not under the plugin: anything
 				   the markdown mounts (embeds, other plugins' processors) then unloads when
@@ -385,11 +369,10 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		);
 
-		/* create the input for the file already open at load. Whether that file's own file-open
-		   landed before the listener above existed is a race, so this runs the switch by hand:
-		   without it currentFile stays null, and both save paths are gated on it - keystrokes
-		   on the first note of a session were cached nowhere. Positioning follows from the
-		   ResizeObserver onFileSwitch installs, as it does for every other switch. */
+		/* The file already open at load: whether its own file-open landed before the listener
+		   above existed is a race, so run the switch by hand. Without it currentFile stays null,
+		   and both save paths are gated on it - keystrokes on the first note of a session were
+		   cached nowhere. */
 		this.app.workspace.onLayoutReady(() => this.handleFileSwitch());
 	}
 
@@ -416,9 +399,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Marks the views currently showing a chat note, and strips the ones that aren't.
 	   `chat-note-view` scopes every rule in styles.css that reaches Obsidian's own note
-	   elements (background, bottom padding for the input, embed spacing) - unscoped they
-	   would restyle every note in the vault. The view actions follow the same lifetime:
-	   a tab that navigates away from a chat note keeps neither. */
+	   elements - unscoped they would restyle every note in the vault. The view actions share
+	   that lifetime: a tab that navigates away from a chat note keeps neither. */
 	syncChatViews() {
 		this.forEachMarkdownView(view => {
 			const file = view.file;
@@ -458,7 +440,6 @@ export default class ChatNotesPlugin extends Plugin {
 			this.getChatNote(this.currentFile).inputCache = this.getInputValue();
 		}
 
-		// return if new file is not a chat file
 		if (!newFile || !this.getIsChatNote(newFile)) {
 			input.setCssStyles({ display: "none" });
 			this.resizeObserver?.disconnect();
@@ -473,15 +454,11 @@ export default class ChatNotesPlugin extends Plugin {
 		this.setInputValue(saved);
 		void this.updateReplyBanner();
 
-		/* A view container is REUSED when its tab navigates to another file, and it goes on
-		   carrying the previous file's --settings-msg-* properties and classes. Applied here,
-		   at the switch, rather than left to the first message that renders: that gate is an
-		   identity check on the FILE's config, so coming back to a file whose config hasn't
-		   changed since it was last applied skips it - and a back/forward that re-inserts an
-		   already rendered view runs no processor at all. Either way the container kept the
-		   other file's colours.
-
-		   Also covers the pinned-only filter, which applyConfigToFile re-asserts. */
+		/* A view container is REUSED when its tab navigates to another file, and arrives still
+		   carrying the previous file's --settings-msg-* properties and classes. Applied at the
+		   switch rather than left to the first message to render: that gate is an identity check
+		   on the FILE's config, so returning to an unchanged file skips it, and a back/forward
+		   that re-inserts a rendered view runs no processor at all. */
 		await this.applyConfigToFile(newFile);
 
 		// the container now matches this file's config, so the first message to render would
@@ -489,7 +466,6 @@ export default class ChatNotesPlugin extends Plugin {
 		const note = this.getChatNote(newFile);
 		note.lastAppliedConfig = note.configCache;
 
-		// add scroll buttons to the newly opened chat file
 		addScrollButtons(view);
 		// bound to this view, so the button filters the file it belongs to
 		addPinButton(view, () => this.togglePinFilter(view));
@@ -501,7 +477,6 @@ export default class ChatNotesPlugin extends Plugin {
 			view.contentEl.appendChild(input);
 		}
 
-		// Watch for iternal widow resizes (and update chat input field position)
 		this.setupResizeObserver(view);
 
 	}
@@ -519,11 +494,8 @@ export default class ChatNotesPlugin extends Plugin {
 		// too; a file that just lost its frontmatter must not, that's how a chat note ends
 		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return;
 
-		/* The chat owner, read before the cache is replaced below. Every other config value
-		   reaches the page through applyConfigToFile, but this one is compared per message
-		   (isOwnerMessage) and stamped on the row at render, so a change to it needs a rerender
-		   - see the branch below. Compared resolved rather than raw, so the blank `author:` a
-		   new chat note is created with reads the same as no key at all. */
+		// read before updateFileConfig replaces the cache, and resolved rather than raw, so the
+		// blank `author:` a new note is created with reads the same as no key at all
 		const previousAuthor = note.configCache?.author;
 
 		// safe new config metadata changes to cache (this re-seeds yamlCache with the above)
@@ -549,14 +521,10 @@ export default class ChatNotesPlugin extends Plugin {
 			// identity check - without this the next render applies the same config again
 			note.lastAppliedConfig = note.configCache;
 
-			/* The one override a config sweep cannot deliver. `is-owner` decides which gutter a
-			   message's author badge sits in, and it is a comparison against this value, stamped
-			   on the row at render (createElementsHTML): the sweep in applyPerMessageStyles can
-			   only re-toggle it on rows that are mounted, and Live Preview re-inserts the DOM it
-			   cached for an off-screen block without re-running the processor - so everything
-			   scrolled away kept its old gutter until the note was refreshed. Unlike a colour it
-			   can't move to the container, since CSS cannot compare a row to a file-level name.
-			   A rerender is affordable here because the owner is normally set once per note. */
+			/* The one override a sweep can't deliver: `is-owner` is a comparison against the
+			   owner, stamped on the row at render, and CSS can't compare a row to a file-level
+			   name. So the rows Live Preview has unmounted keep the old gutter - hence a full
+			   rerender, affordable because the owner is normally set once per note. */
 			if (ownerChanged) this.scheduleRefresh(file);
 
 		} else if (currentStatus !== previousStatus) {
@@ -566,9 +534,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	/* A rerender, delayed until the UI and the markdown have settled: run straight out of the
-	   metadata handler, it errors inside the embed-link plugin. Nothing to do about the chat
-	   input here - the rerender provokes onFileSwitch, which repositions it. */
+	// delayed until the UI and the markdown have settled: run straight out of the metadata
+	// handler it errors inside the embed-link plugin. The rerender repositions the input itself
 	scheduleRefresh(file: TFile) {
 		setTimeout(() => {
 			void this.refreshFile(file);
@@ -594,16 +561,15 @@ export default class ChatNotesPlugin extends Plugin {
 		if (view) this.updateChatInputPosition(view);
 	}
 
+	// sets the position and size of the message input field
 	updateChatInputPosition(view: MarkdownView) {
-		// set/update the position and size of the message input field
 
 		const input = this.getChatInput();
 
 		/* Picked by mode, never by a `||` fallback: Obsidian keeps BOTH subviews mounted and
-		   hides the inactive one, so .cm-contentContainer still exists in reading mode - the
-		   fallback never fired and the hidden element measured 0x0, collapsing the input and
-		   throwing it to the left. Each selector is scoped to its own subview so a theme's
-		   stray sizer can't win. */
+		   hides the inactive one, so the hidden element still exists and measures 0x0 - which
+		   collapsed the input and threw it to the left. Each selector is scoped to its own
+		   subview so a theme's stray sizer can't win. */
 		const inner = view.getMode() === "preview"
 			? view.containerEl.querySelector(".markdown-reading-view .markdown-preview-sizer")
 			: view.containerEl.querySelector(".markdown-source-view .cm-contentContainer");
@@ -647,10 +613,9 @@ export default class ChatNotesPlugin extends Plugin {
 				// preview = reading mode
 				view.previewMode.rerender(true);
 			} else {
-				/* editor in live preview (or source mode). rebuildView is the only thing that
-				   rebuilds the editor's widgets, and it is NOT in obsidian.d.ts - so it is
-				   probed rather than assumed, and a version without it falls back to the
-				   reading-mode path instead of throwing inside an event handler. */
+				/* Editor in live preview (or source mode). rebuildView is the only thing that
+				   rebuilds the editor's widgets, and is NOT in obsidian.d.ts - so it is probed
+				   rather than assumed, and falls back to the reading-mode path. */
 				type RebuildableLeaf = WorkspaceLeaf & {
 					rebuildView?: () => Promise<void>;
 				};
@@ -666,11 +631,9 @@ export default class ChatNotesPlugin extends Plugin {
 			this.updateChatInputPosition(view);
 		}
 
-		/* Mounting the input is onFileSwitch's job, and only the editor branch above happens to
-		   provoke the event that runs it (rebuildView reloads the view; previewMode.rerender
-		   only redraws markdown). So a note that became a chat note while in reading view got
-		   no input, and one that stopped being a chat note kept it. Run it by hand instead of
-		   relying on which branch fired what - it is idempotent. */
+		/* Mounting the input is onFileSwitch's job, and only the editor branch above provokes
+		   the event that runs it (previewMode.rerender only redraws markdown). Run by hand
+		   rather than relying on which branch fired what - it is idempotent. */
 		this.handleFileSwitch();
 	}
 
@@ -772,9 +735,8 @@ export default class ChatNotesPlugin extends Plugin {
 		const pinState = await this.toggleMessagePinned(file, msgId);
 		if (pinState === null) return;
 
-		/* Flip the flag on every rendered copy now rather than waiting for the reparse the write
-		   triggers - the click should feel immediate. Nothing else to paint: the bubble colour
-		   and the pinned-only filter both follow this attribute in CSS. */
+		// now rather than on the reparse the write triggers, so the click feels immediate.
+		// Nothing else to paint: colour and filter both follow this attribute in CSS
 		for (const row of findMessageRows(this.app, file, msgId)) {
 			row.dataset.pinned = String(pinState);
 		}
@@ -808,10 +770,9 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Records which message a file's pending reply points at, and rewrites the stylesheet that
 	   marks it. Nothing touches the rows: a generated rule styles whichever row matches,
-	   whenever it happens to be mounted, so it survives Live Preview re-inserting a cached row
-	   without re-running the codeblock processor. Clearing is just as important - a class
-	   removed by hand can't reach a row that is unmounted at the time, which is how the old
-	   target kept its outline while the new one got none. */
+	   whenever it mounts, so it survives Live Preview re-inserting a cached row. Clearing
+	   matters just as much - a class removed by hand can't reach an unmounted row, which is
+	   how the old target kept its outline while the new one got none. */
 	private setReplyTarget(file: TFile, msgId: string | undefined) {
 		if (msgId) this.replyTargets.set(file.path, msgId);
 		else this.replyTargets.delete(file.path);
@@ -822,13 +783,10 @@ export default class ChatNotesPlugin extends Plugin {
 	private refreshReplyTargetStyle() {
 		if (!this.replyTargetStyleEl) {
 			/* Knowingly against obsidianmd/no-forbidden-elements, which exists to stop plugins
-			   shipping their *appearance* from JS. Nothing of the sort happens here: every
-			   declaration lives in styles.css, and this element carries only a selector naming
-			   which row is currently the target - a fact that changes at runtime and cannot be
-			   expressed statically (CSS cannot compare a container's attribute to a row's).
-			   The alternative, re-asserting a class from a MutationObserver, costs a
-			   document-wide query on every frame the DOM churns to achieve the same thing.
-			   Removed again in onunload. */
+			   shipping their *appearance* from JS. No appearance ships here: the declarations
+			   live in styles.css and this element carries only a selector naming the current
+			   target, which changes at runtime and cannot be expressed statically. Removed
+			   again in onunload. */
 			// eslint-disable-next-line obsidianmd/no-forbidden-elements
 			this.replyTargetStyleEl = document.createElement("style");
 			document.head.appendChild(this.replyTargetStyleEl);
@@ -883,12 +841,10 @@ export default class ChatNotesPlugin extends Plugin {
 		restore: () => void;
 	}) {
 
-		// If same editor = do nothing
 		if (this.activeEditor?.container === newEditor.container) {
 			return;
 		}
 
-		// Close previous editor
 		if (this.activeEditor) {
 			this.activeEditor.restore();
 		}
@@ -975,11 +931,9 @@ export default class ChatNotesPlugin extends Plugin {
 		this.applyPinFilter(file, { animate: true });
 	}
 
-	/* Applies the pinned-only filter by putting one class on each of the file's containers.
-	   The hiding itself is CSS, matched against the data-pinned flag every row carries from
-	   render - so it covers rows that mount later, or that Live Preview re-inserts from its
-	   cache without re-running the codeblock processor. Nothing here walks the rows to hide
-	   them; the walk below is only to animate what moved. */
+	/* Applies the pinned-only filter by putting one class on each of the file's containers. The
+	   hiding itself is CSS, matched against the data-pinned flag every row carries from render,
+	   so it covers rows that mount later too. The walk below is only to animate what moved. */
 	applyPinFilter(file: TFile, options?: { animate?: boolean }) {
 		const on = this.getChatNote(file).pinFilter === true;
 		const animate = options?.animate === true;
@@ -1024,16 +978,11 @@ export default class ChatNotesPlugin extends Plugin {
 	}) {
 		const context = await this.getArchiveContext(file);
 
-		/* The same message has a row in every place the file is rendered, and `isConnected`
-		   tells them apart not at all: the subview you are NOT in stays mounted, so once Live
-		   Preview has rendered, its rows are still in the document while you read. Picking one
-		   of those meant scrolling and flashing a hidden node - no scroll, no flash, and a
-		   1.5s wait for a rect that never became visible.
-
-		   So: only rows actually on the page, and - when the call came from a click - only the
-		   one sharing that click's scroller. Strictly, not as a preference: a copy in another
-		   split pane is no use to the reader looking at this one, and the fallback below mounts
-		   it where they are actually looking. */
+		/* Only rows actually on the page (the inactive subview stays mounted, so `isConnected`
+		   tells nothing) and - when the call came from a click - only the one sharing that
+		   click's scroller. Strictly, not as a preference: a copy in another split pane is no
+		   use to the reader looking at this one, and the fallback below mounts it where they
+		   are actually looking. */
 		const origin = options?.origin;
 		const scroller = origin ? rowScroller(origin) : null;
 		const rendered = findMessageRows(this.app, file, msgId).filter(isRowRendered);
@@ -1048,12 +997,9 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!row) {
 			const entry = context.messageMap.get(msgId);
 
-			/* Reported here rather than at the callsite, because this is the only place the
-			   reason is known: the other failure below (no row after waiting) means the message
-			   exists but couldn't be mounted, and must stay silent instead of claiming it was
-			   deleted. Reaches the reply banners of rows that predate the delete - once such a
-			   row re-renders it becomes the inert "Message not found" variant and can't be
-			   clicked at all. */
+			/* Reported here rather than at the callsite: this is the only place the reason is
+			   known. The other failure below (no row after waiting) means the message exists but
+			   couldn't be mounted, and must stay silent rather than claim it was deleted. */
 			if (!entry) {
 				new Notice("That message is no longer in the file");
 				return false;
@@ -1165,13 +1111,9 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	/* Colour pickers and sliders call this on every drag tick, so it does the least work that
-	   still shows the change: the config path only, never a rerender. Every setting in the tab
-	   reaches the page through applyConfigToFile (custom properties, container classes, the
-	   per-message sweep, the pin filter, the input geometry) - see "Settings apply without a
-	   rerender" in DEVELOPMENT.md.
-
-	   Open files only. A file that isn't open has no config worth refreshing: it gets a fresh
-	   one from updateFileConfig when it is opened. */
+	   still shows the change: the config path only, never a rerender - every setting in the tab
+	   reaches the page through applyConfigToFile. Open files only; anything else gets a fresh
+	   config from updateFileConfig when it is opened. */
 	async saveSettings() {
 		await this.saveData(this.settings);
 
@@ -1197,7 +1139,6 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	updateFileConfig(file: TAbstractFile) {
-		// update and store config cache for a file
 		if (!(file instanceof TFile)) return;
 		const overrides = getFileOverrides(this.app, file);
 		const resolved = resolveConfig(this.settings, overrides);
@@ -1214,7 +1155,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Styling */
 
-	async applyStyles(container: HTMLElement, config: ChatConfig, context: ArchiveContext) {
+	async applyStyles(container: HTMLElement, config: ChatConfig) {
 
 		if (config.messageBgColor) {
 			container.style.setProperty(
@@ -1228,18 +1169,11 @@ export default class ChatNotesPlugin extends Plugin {
 			);
 		}
 
-		/* The pinned colour is a container property too, and reaches the pinned bubbles through
-		   the [data-pinned="true"] rule in styles.css, which redefines the two properties above
-		   for that row - exactly the override that used to be written onto each row by hand.
-
-		   Not painted per row, for the same reason the pinned-only filter and the reply outline
-		   aren't: Live Preview unmounts a block that scrolls far off screen and re-inserts the
-		   DOM it cached without re-running the codeblock processor. An inline value written by
-		   a sweep therefore came back stale - and, being inline, went on shadowing this cascade
-		   for good - while a row that was unmounted while the sweep ran was never touched at
-		   all. Only the rows near the viewport followed a colour change; the rest needed a
-		   rerender. A container property needs no sweep: it applies to whatever is mounted,
-		   whenever it mounts. */
+		/* A container property like the rest, reaching the pinned bubbles through the
+		   [data-pinned="true"] rule in styles.css, which redefines the two above for that row.
+		   Never painted per row: Live Preview re-inserts a cached row without re-running the
+		   processor, so a swept inline value came back stale and then shadowed the cascade for
+		   good - the same reason the pin filter and the reply outline are container rules. */
 		if (config.messagePinColor) {
 			container.style.setProperty(
 				"--settings-msg-pin-color",
@@ -1306,15 +1240,11 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	/* Per-message state that the container-level cascade can't express: which gutter the author
-	   badge sits in, and the row's own pinned flag.
+	/* Per-message state the container-level cascade can't express: which gutter the author badge
+	   sits in, and the row's own pinned flag. Colour is deliberately not here - see applyStyles.
 
-	   Colour is deliberately not here. Both bubble colours are container properties that CSS
-	   picks between on `data-pinned` (see applyStyles) - painting them per row meant the rows
-	   Live Preview had unmounted kept the old colour until a rerender.
-
-	   Walks the rendered rows rather than the message map - only rows on screen can be
-	   styled, and in a long chat they are a tiny fraction of the file. */
+	   Walks the rendered rows rather than the message map: only rows on screen can be styled,
+	   and in a long chat they are a tiny fraction of the file. */
 	applyPerMessageStyles(file: TFile, context: ArchiveContext) {
 
 		for (const rowsById of collectMessageRows(this.app, file)) {
@@ -1327,11 +1257,9 @@ export default class ChatNotesPlugin extends Plugin {
 				for (const row of rows) {
 					row.classList.toggle("is-owner", context.isOwnerMessage(message));
 
-					/* Brings the row's own pinned flag back in line with the model. The
-					   processor stamps it at render, but a block re-rendered from a model that
-					   was momentarily behind the file (right after a write) carries the old
-					   value - and both the pinned colour and the pinned-only filter match on
-					   exactly this. */
+					// back in line with the model: a block rendered from a model that briefly
+					// lagged the file (right after a write) carries the old flag, and both the
+					// pinned colour and the pin filter match on exactly this
 					row.dataset.pinned = String(pinned);
 				}
 			}
@@ -1344,9 +1272,9 @@ export default class ChatNotesPlugin extends Plugin {
 		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
 	}
 
+	// pushes the file's config to its archive context (non-CSS settings) and to every container
+	// it is open in (the CSS variables)
 	async applyConfigToFile(file: TFile){
-		// push the file's current config to its archive context (non-CSS settings) and to
-		// every html container it's open in (the CSS variables)
 
 		const config = this.getConfigCache(file);
 		const context = await this.getArchiveContext(file);
@@ -1356,15 +1284,14 @@ export default class ChatNotesPlugin extends Plugin {
 		this.applyConfigToContext(context, config);
 
 		for (const container of getActiveContainers(this.app, file)) {
-			await this.applyStyles(container, config, context);
+			await this.applyStyles(container, config);
 		}
 
-		/* Once for the file, not once per container: it walks the rendered rows itself, so
-		   running it inside the loop above just repeated the same sweep. */
+		// once for the file, not once per container: it walks the rendered rows itself
 		this.applyPerMessageStyles(file, context);
 
-		// the pinned-only filter is a class on rows, so a re-render or a config sweep has to
-		// re-assert it - without animating, since nothing moved from the reader's point of view
+		// re-asserted after a render or a config change, without animating - nothing moved from
+		// the reader's point of view
 		this.applyPinFilter(file);
 
 		// the author badge setting widens the gutter the input's geometry derives from;
@@ -1390,14 +1317,11 @@ export default class ChatNotesPlugin extends Plugin {
 		return this.chatInputEl;
 	}
 
-	/* The message textarea itself, never a query for it: the container also holds the author
-	   and timestamp override fields, and those come first in the DOM. A selector list matches
-	   in document order regardless of how it is written, so "textarea, input" resolved to the
-	   author field - drafts were saved and restored there, and the real draft was never
-	   touched (it looked like one draft shared by every file).
+	/* The message textarea itself, never a query for it: the container also holds the author and
+	   timestamp override fields, which come first in the DOM, so a "textarea, input" selector
+	   list resolved to the author field and drafts were saved there instead.
 
-	   Both tolerate the input not existing yet: getChatInput builds it lazily, and
-	   onFileSwitch is only the first caller by convention, not by construction. */
+	   Both tolerate the input not existing yet - getChatInput builds it lazily. */
 	getInputValue(): string {
 		return this.chatTextareaEl?.value ?? "";
 	}
@@ -1411,8 +1335,6 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
     getChatNote(file: TFile): ChatNote {
-		// returns the existing ChatNote or creates a new empty one
-
         let note = this.chatNotes.get(file);
 
         if (!note) {
@@ -1445,17 +1367,14 @@ export default class ChatNotesPlugin extends Plugin {
 		return note.isChatNote;
 	}
 
-	/* Replaces a file's parsed model when its text changes - the one invalidation rule the
-	   whole cache needs, now that nothing fragile is cached alongside it.
+	/* Replaces a file's parsed model when its text changes - the one invalidation rule the whole
+	   cache needs. Gated on a context already existing: this event fires for every markdown file
+	   in the vault on every save, and building models for files nobody has rendered would parse
+	   the whole vault. Rebuilt rather than dropped because `data` is already in hand.
 
-	   Gated on a context already existing: this event fires for every markdown file in the
-	   vault on every save, and building models for files nobody has rendered would parse the
-	   whole vault. Rebuilt eagerly rather than dropped because `data` is already in hand; a
-	   lazy drop would trade this parse for a parse *and* a read on the next render.
-
-	   Note the metadata cache is debounced, so during typing the model briefly lags the file.
-	   Nothing depends on it being current: writes re-locate their block by id, and a block
-	   the model hasn't seen is rendered straight from its own source. */
+	   The metadata cache is debounced, so during typing the model briefly lags the file. Nothing
+	   depends on it being current: writes re-locate their block by id, and a block the model
+	   hasn't seen is rendered straight from its own source. */
 	invalidateArchiveContext(file: TFile, data: string) {
 		if (!this.archiveContexts.has(file.path)) return;
 
@@ -1471,9 +1390,8 @@ export default class ChatNotesPlugin extends Plugin {
 		this.applyConfigToContext(context, config);
 		this.archiveContexts.set(file.path, Promise.resolve(context));
 
-		/* Rows already on screen were styled and classed from the model that just got
-		   replaced. Newly mounted rows pick this up from the processor; these are the ones
-		   that were already there. */
+		// rows already on screen were classed from the model that just got replaced; newly
+		// mounted ones pick this up from the processor
 		this.applyPerMessageStyles(file, context);
 		this.applyPinFilter(file);
 	}
@@ -1497,18 +1415,17 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* The one path that rewrites a message block.
 
-	   It locates the block by **id, in the text it is about to modify** - never from a cached
-	   line number. Any edit above a message shifts its lines, and the context can lag the
-	   file by a metadata debounce, so a write keyed off `entry.startLine` could seek the
-	   header separator of a different message and splice into it. That was silent corruption.
+	   Locates the block by **id, in the text it is about to modify** - never from a cached line
+	   number. Any edit above a message shifts its lines, and the model can lag the file by a
+	   metadata debounce, so a write keyed off `entry.startLine` could splice into a different
+	   message's header. That was silent corruption.
 
-	   Reads through the open editor when the file has one: an editor with unsaved changes has
-	   not reached disk, so vault.read would return superseded text and the write would
-	   clobber whatever the user had just typed. Writing back through the editor also keeps
-	   undo history and the caret intact; vault.process is the atomic fallback otherwise.
+	   Reads through the open editor when there is one: unsaved changes haven't reached disk, so
+	   vault.read would return superseded text and clobber what the user just typed. Writing back
+	   through the editor also keeps undo history and the caret; vault.process is the fallback.
 
-	   `transform` receives the block's own lines and returns their replacement, or null to
-	   remove the block entirely. Returns false when the message is no longer in the file. */
+	   `transform` receives the block's own lines and returns their replacement, or null to remove
+	   the block. Returns false when the message is no longer in the file. */
 	async withMessageBlock(
 		file: TFile,
 		msgId: string,
@@ -1541,19 +1458,14 @@ export default class ChatNotesPlugin extends Plugin {
 		);
 		const updated = updatedLines.join("\n");
 
-		/* Refresh the model from the text about to be written, BEFORE writing it, rather than
-		   waiting for the metadata cache (debounced by roughly the editor's save delay).
+		/* Refresh the model from the text about to be written, BEFORE writing it - not after,
+		   and not by waiting for the debounced metadata cache. The write re-renders the block,
+		   and the codeblock processor is async: it captures a context, yields, and resumes with
+		   it. Refreshing afterwards means it captured the pre-write model and rebuilt the row
+		   describing the old state, which no sweep can fix - the row doesn't exist yet.
 
-		   Before the write, not after, because the write re-renders the block and the
-		   codeblock processor is async: it calls getArchiveContext, yields on that promise,
-		   and resumes with whatever context it captured. Refreshing afterwards means it
-		   captured the pre-write one, so the row is rebuilt describing the old state - old
-		   bubble colour, and a data-pinned the pinned-only filter then believes - and a sweep
-		   running in between cannot help, because the row it needs to fix does not exist yet.
-		   Refreshing first means every render the write provokes reads the new model.
-
-		   If the write below then fails, the model is briefly ahead of the file; the next
-		   metadata change puts it back. */
+		   If the write then fails, the model is briefly ahead of the file; the next metadata
+		   change puts it back. */
 		this.invalidateArchiveContext(file, updated);
 
 		if (editor) {
@@ -1653,10 +1565,10 @@ export default class ChatNotesPlugin extends Plugin {
 		let pinned: boolean | null = null;
 
 		const ok = await this.withMessageBlock(file, msgId, ({ lines }) => {
-			// patched in place rather than round-tripped through Message.toString(), which
-			// would reorder the header's keys and renormalise the body - a large, surprising
-			// diff for what is one flag
-			// hand the lines back untouched, NOT null - null means "delete this block"
+			/* Patched in place rather than round-tripped through Message.toString(), which
+			   would reorder the header's keys and renormalise the body - a large, surprising
+			   diff for one flag. On a malformed block the lines go back untouched, NOT null:
+			   null means "delete this block". */
 			const headerEnd = lines.indexOf("~~~");
 			if (headerEnd === -1) return lines;
 
