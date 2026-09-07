@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in Chat Notes doesn't work as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and OS
+      description: Obsidian version (Settings → About), Chat Notes version, and your operating system.
+      placeholder: Obsidian 1.9.1, Chat Notes 1.0.0, Windows 11
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which view mode?
+      description: Reading View and Live Preview render messages very differently, so this narrows most bugs down immediately.
+      options:
+        - Live Preview
+        - Reading view
+        - Source mode
+        - Both, or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: frontmatter
+    attributes:
+      label: The note's properties
+      description: The frontmatter block at the top of the chat note, if it sets any overrides. Leave blank if there are none.
+      render: yaml
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: It still happens with every other plugin disabled
+        - label: The note was open in a separate window (popout) when it happened

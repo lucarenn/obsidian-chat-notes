@@ -49,9 +49,8 @@ type StickyEntry = {
 };
 
 type ScrollerGroup = {
-	/* The scroller's own window, kept rather than read back from the element at teardown: a
-	   popout is a separate window, and a detached node reports the global one instead - which
-	   would remove the listener from the wrong window and leave the real one behind. */
+	/* The scroller's own window, kept rather than read back at teardown: a detached node reports
+	   the *global* window, which would remove the listener from the wrong one. */
 	win: Window;
 	// keyed by row, so the observer callback resolves a record straight to its entry
 	entries: Map<Element, StickyEntry>;

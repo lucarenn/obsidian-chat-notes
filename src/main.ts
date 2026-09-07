@@ -61,13 +61,12 @@ export default class ChatNotesPlugin extends Plugin {
 	private replyTargets = new Map<string, string>();
 	private replyTargetStyleEl: HTMLStyleElement | null = null;
 
-	/* Timers the plugin can take back - see `later` and the scroll loop below. Obsidian reclaims
-	   neither, and a callback that lands after onunload runs against a plugin that is gone. */
+	/* Timers the plugin can take back: Obsidian reclaims none of them, and a callback that lands
+	   after onunload runs against a plugin that is gone. */
 	private timeouts = new Set<number>();
 	private scrollPinFrame: number | null = null;
-	/* A closure rather than a frame id: this one is scheduled in whichever window the view lives
-	   in, and frame ids are per window - cancelling a popout's frame through the main window's
-	   cancelAnimationFrame would miss it and could hit an unrelated frame. */
+	// a closure, not a frame id: this one is scheduled in the view's own window, and frame ids
+	// are per window
 	private cancelResizeFrame: (() => void) | null = null;
 
 	activeEditor: {
@@ -559,10 +558,9 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	/* window.setTimeout the plugin can take back. Timers in ui.ts are left as they are - those
-	   only touch their own element, which is detached by the time they fire - but anything that
-	   reaches back into the plugin has to be cancellable: scheduleRefresh's rerender ends in
-	   handleFileSwitch, which would remount the chat input and its keymap scopes after unload. */
+	/* For anything that reaches back into the plugin - scheduleRefresh above all, whose rerender
+	   ends in handleFileSwitch and would remount the chat input, keymap scopes and all, after
+	   unload. Element-local timers don't need it; see DEVELOPMENT.md. */
 	private later(fn: () => void, ms: number) {
 		const id = window.setTimeout(() => {
 			this.timeouts.delete(id);
@@ -578,27 +576,24 @@ export default class ChatNotesPlugin extends Plugin {
 		this.later(() => { void this.refreshFile(file); }, 300);
 	}
 
+	/* Every piece of this is bound to the element's OWN window, and re-run when the view moves to
+	   another one - see "And more than one window" in DEVELOPMENT.md. */
 	setupResizeObserver(view: MarkdownView) {
 		const el = view.contentEl;
 		if (!el) return;
 
-		/* Clean up the previous observer, its pending frame - which would otherwise land on the
-		   view that just went away - and the migration hook */
+		// the pending frame too: it would otherwise land on the view that just went away
 		this.resizeObserver?.disconnect();
 		this.cancelResizeFrame?.();
 		this.cancelResizeFrame = null;
 		this.windowMigration?.();
 		this.windowMigration = null;
 
-		/* Constructed from the element's OWN window rather than the main one. A popout is a
-		   separate window, and an observer only delivers callbacks from the rendering lifecycle
-		   of the window it was made in - so a main-window observer never fired for a resized
-		   popout, and the input kept the geometry it had measured before the resize. */
 		const win = el.win as Window & typeof globalThis;
 
-		/* Coalesced to one measurement per frame, the way sticky.ts batches its scroll work: a
-		   drag delivers several observation cycles per frame across the elements below, and each
-		   pass reads two rects and a computed style before writing back. */
+		// one measurement per frame, the way sticky.ts batches its scroll work: a drag delivers
+		// several observation cycles across the elements below, and each pass reads two rects
+		// and a computed style before writing back
 		this.resizeObserver = new win.ResizeObserver(() => {
 			if (this.cancelResizeFrame) return;
 
@@ -612,21 +607,17 @@ export default class ChatNotesPlugin extends Plugin {
 
 		this.resizeObserver.observe(el);
 
-		/* Also the elements the geometry is actually read from. contentEl resizes first and
+		/* And the elements the geometry is actually read from: contentEl resizes first and
 		   CodeMirror re-measures its own container a beat later, so watching contentEl alone
-		   measured the old box: on a resize the input swung off-centre and stayed there until
-		   something unrelated recomputed it. The hidden subview's sizer measures 0x0, which
-		   updateChatInputPosition already bails on. */
+		   measured the old box and left the input off-centre. The hidden subview's sizer
+		   measures 0x0, which updateChatInputPosition already bails on. */
 		for (const selector of Object.values(INPUT_SIZER_SELECTORS)) {
 			const sizer = view.containerEl.querySelector(selector);
 			if (sizer instanceof HTMLElement) this.resizeObserver.observe(sizer);
 		}
 
-		/* Dragging a tab into another window MOVES the leaf instead of opening a file, so
-		   neither file-open nor active-leaf-change re-runs the switch - and everything above
-		   stays bound to the window the view just left, which is why a dragged-out tab lagged
-		   while "Open in new window" behaved. This is Obsidian's own signal for the move, and
-		   it fires once the node is in its new window, when el.win is finally the right one. */
+		// a dragged-out tab MOVES the leaf rather than opening a file, so no file event re-runs
+		// this - and everything above would stay bound to the window the view just left
 		this.windowMigration = el.onWindowMigrated(() => {
 			this.setupResizeObserver(view);
 			this.updateChatInputPosition(view);
