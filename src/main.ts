@@ -519,8 +519,17 @@ export default class ChatNotesPlugin extends Plugin {
 		// too; a file that just lost its frontmatter must not, that's how a chat note ends
 		if (JSON.stringify(newFrontmatter) === JSON.stringify(oldFrontmatter))  return;
 
+		/* The chat owner, read before the cache is replaced below. Every other config value
+		   reaches the page through applyConfigToFile, but this one is compared per message
+		   (isOwnerMessage) and stamped on the row at render, so a change to it needs a rerender
+		   - see the branch below. Compared resolved rather than raw, so the blank `author:` a
+		   new chat note is created with reads the same as no key at all. */
+		const previousAuthor = note.configCache?.author;
+
 		// safe new config metadata changes to cache (this re-seeds yamlCache with the above)
 		this.updateFileConfig(file);
+
+		const ownerChanged = previousAuthor !== note.configCache?.author;
 
 		// `?? false`: an unrendered file has no recorded status, and `false !== undefined`
 		// would count "still not a chat note" as a change
@@ -540,18 +549,30 @@ export default class ChatNotesPlugin extends Plugin {
 			// identity check - without this the next render applies the same config again
 			note.lastAppliedConfig = note.configCache;
 
+			/* The one override a config sweep cannot deliver. `is-owner` decides which gutter a
+			   message's author badge sits in, and it is a comparison against this value, stamped
+			   on the row at render (createElementsHTML): the sweep in applyPerMessageStyles can
+			   only re-toggle it on rows that are mounted, and Live Preview re-inserts the DOM it
+			   cached for an off-screen block without re-running the processor - so everything
+			   scrolled away kept its old gutter until the note was refreshed. Unlike a colour it
+			   can't move to the container, since CSS cannot compare a row to a file-level name.
+			   A rerender is affordable here because the owner is normally set once per note. */
+			if (ownerChanged) this.scheduleRefresh(file);
+
 		} else if (currentStatus !== previousStatus) {
 			// chat status has changed -> rerender completly
-
-			setTimeout(() => {
-				// delay until UI + markdown settle
-				void this.refreshFile(file);
-
-				// the rerender triggers onFileSwitch, which repositions the input already
-
-			}, 300); // timeout 300ms prevents error in embed link plugin.
+			this.scheduleRefresh(file);
 		}
 
+	}
+
+	/* A rerender, delayed until the UI and the markdown have settled: run straight out of the
+	   metadata handler, it errors inside the embed-link plugin. Nothing to do about the chat
+	   input here - the rerender provokes onFileSwitch, which repositions it. */
+	scheduleRefresh(file: TFile) {
+		setTimeout(() => {
+			void this.refreshFile(file);
+		}, 300);
 	}
 
 	setupResizeObserver(view: MarkdownView) {
