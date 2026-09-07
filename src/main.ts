@@ -23,6 +23,14 @@ function renderFallbackBlock(el: HTMLElement, source: string) {
 // how long "Scroll to bottom on send" keeps re-scrolling (see scrollToBottomAfterSend)
 const SCROLL_ON_SEND_PIN_MS = 500;
 
+/* The element the chat input's geometry is measured from, per view mode. Obsidian keeps BOTH
+   subviews mounted and hides the inactive one, so both of these exist at once - which is what
+   lets setupResizeObserver watch the pair without re-targeting on a mode switch. */
+const INPUT_SIZER_SELECTORS = {
+	preview: ".markdown-reading-view .markdown-preview-sizer",
+	source: ".markdown-source-view .cm-contentContainer"
+} as const;
+
 // escapes a value for a double-quoted CSS attribute selector - vault paths are user text and
 // may contain either of these
 function cssAttr(value: string): string {
@@ -38,6 +46,8 @@ export default class ChatNotesPlugin extends Plugin {
 	chatReplyBannerEl: HTMLElement;
 	chatReplyTextEl: HTMLElement;
 	resizeObserver: ResizeObserver | null = null;
+	// releases the migration hook the observer is re-registered by (see setupResizeObserver)
+	private windowMigration: (() => void) | null = null;
 	currentFile: TFile | null = null;
 	ribbonIconEl: HTMLElement | null = null;
 	chatInputTeardown: (() => void) | null = null;
@@ -55,6 +65,10 @@ export default class ChatNotesPlugin extends Plugin {
 	   neither, and a callback that lands after onunload runs against a plugin that is gone. */
 	private timeouts = new Set<number>();
 	private scrollPinFrame: number | null = null;
+	/* A closure rather than a frame id: this one is scheduled in whichever window the view lives
+	   in, and frame ids are per window - cancelling a popout's frame through the main window's
+	   cancelAnimationFrame would miss it and could hit an unrelated frame. */
+	private cancelResizeFrame: (() => void) | null = null;
 
 	activeEditor: {
 		container: HTMLElement;
@@ -387,12 +401,14 @@ export default class ChatNotesPlugin extends Plugin {
 	onunload() {
 		this.chatInputTeardown?.();
 		this.resizeObserver?.disconnect();
+		this.windowMigration?.();
 		this.replyTargetStyleEl?.remove();
 		this.chatInputEl?.remove();
 
 		for (const id of this.timeouts) window.clearTimeout(id);
 		this.timeouts.clear();
 		if (this.scrollPinFrame !== null) cancelAnimationFrame(this.scrollPinFrame);
+		this.cancelResizeFrame?.();
 
 		this.forEachMarkdownView(view => {
 			view.contentEl.classList.remove("chat-note-view");
@@ -566,14 +582,55 @@ export default class ChatNotesPlugin extends Plugin {
 		const el = view.contentEl;
 		if (!el) return;
 
-		// Clean up previous observer if needed
+		/* Clean up the previous observer, its pending frame - which would otherwise land on the
+		   view that just went away - and the migration hook */
 		this.resizeObserver?.disconnect();
+		this.cancelResizeFrame?.();
+		this.cancelResizeFrame = null;
+		this.windowMigration?.();
+		this.windowMigration = null;
 
-		this.resizeObserver = new ResizeObserver(() => {
-		  this.updateChatInputPosition(view);
+		/* Constructed from the element's OWN window rather than the main one. A popout is a
+		   separate window, and an observer only delivers callbacks from the rendering lifecycle
+		   of the window it was made in - so a main-window observer never fired for a resized
+		   popout, and the input kept the geometry it had measured before the resize. */
+		const win = el.win as Window & typeof globalThis;
+
+		/* Coalesced to one measurement per frame, the way sticky.ts batches its scroll work: a
+		   drag delivers several observation cycles per frame across the elements below, and each
+		   pass reads two rects and a computed style before writing back. */
+		this.resizeObserver = new win.ResizeObserver(() => {
+			if (this.cancelResizeFrame) return;
+
+			const frame = win.requestAnimationFrame(() => {
+				this.cancelResizeFrame = null;
+				this.updateChatInputPosition(view);
+			});
+
+			this.cancelResizeFrame = () => { win.cancelAnimationFrame(frame); };
 		});
 
 		this.resizeObserver.observe(el);
+
+		/* Also the elements the geometry is actually read from. contentEl resizes first and
+		   CodeMirror re-measures its own container a beat later, so watching contentEl alone
+		   measured the old box: on a resize the input swung off-centre and stayed there until
+		   something unrelated recomputed it. The hidden subview's sizer measures 0x0, which
+		   updateChatInputPosition already bails on. */
+		for (const selector of Object.values(INPUT_SIZER_SELECTORS)) {
+			const sizer = view.containerEl.querySelector(selector);
+			if (sizer instanceof HTMLElement) this.resizeObserver.observe(sizer);
+		}
+
+		/* Dragging a tab into another window MOVES the leaf instead of opening a file, so
+		   neither file-open nor active-leaf-change re-runs the switch - and everything above
+		   stays bound to the window the view just left, which is why a dragged-out tab lagged
+		   while "Open in new window" behaved. This is Obsidian's own signal for the move, and
+		   it fires once the node is in its new window, when el.win is finally the right one. */
+		this.windowMigration = el.onWindowMigrated(() => {
+			this.setupResizeObserver(view);
+			this.updateChatInputPosition(view);
+		});
 	}
 
 	repositionActiveChatInput() {
@@ -590,9 +647,11 @@ export default class ChatNotesPlugin extends Plugin {
 		   hides the inactive one, so the hidden element still exists and measures 0x0 - which
 		   collapsed the input and threw it to the left. Each selector is scoped to its own
 		   subview so a theme's stray sizer can't win. */
-		const inner = view.getMode() === "preview"
-			? view.containerEl.querySelector(".markdown-reading-view .markdown-preview-sizer")
-			: view.containerEl.querySelector(".markdown-source-view .cm-contentContainer");
+		const inner = view.containerEl.querySelector(
+			view.getMode() === "preview"
+				? INPUT_SIZER_SELECTORS.preview
+				: INPUT_SIZER_SELECTORS.source
+		);
 		if (!(inner instanceof HTMLElement)) return;
 
 		const rect = inner.getBoundingClientRect();
@@ -1083,9 +1142,11 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
+	// with no container, the element is measured against its own window's viewport - a row in a
+	// popout has to be checked against that window, not the main one
 	async waitUntilVisible(
 		element: HTMLElement,
-		container: HTMLElement | Window = window,
+		container?: HTMLElement,
 		margin = 20,
 		timeoutMs = 1500
 	): Promise<void> {
@@ -1099,12 +1160,12 @@ export default class ChatNotesPlugin extends Plugin {
 				// taller than the viewport
 				let visible: boolean;
 
-				if (container === window) {
+				if (!container) {
 					visible =
-						rect.top <= window.innerHeight - margin &&
+						rect.top <= element.win.innerHeight - margin &&
 						rect.bottom >= margin;
 				} else {
-					const cRect = (container as HTMLElement).getBoundingClientRect();
+					const cRect = container.getBoundingClientRect();
 					visible =
 						rect.top <= cRect.bottom - margin &&
 						rect.bottom >= cRect.top + margin;

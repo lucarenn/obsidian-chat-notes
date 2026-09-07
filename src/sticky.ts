@@ -49,6 +49,10 @@ type StickyEntry = {
 };
 
 type ScrollerGroup = {
+	/* The scroller's own window, kept rather than read back from the element at teardown: a
+	   popout is a separate window, and a detached node reports the global one instead - which
+	   would remove the listener from the wrong window and leave the real one behind. */
+	win: Window;
 	// keyed by row, so the observer callback resolves a record straight to its entry
 	entries: Map<Element, StickyEntry>;
 	// only on-screen rows are recomputed, keeping scroll cost proportional to what's
@@ -80,6 +84,7 @@ function getGroup(scroller: Element): ScrollerGroup {
 	if (existing) return existing;
 
 	const group: ScrollerGroup = {
+		win: scroller.win,
 		entries: new Map(),
 		visible: new Set(),
 		observer: new IntersectionObserver(
@@ -116,7 +121,9 @@ function getGroup(scroller: Element): ScrollerGroup {
 	};
 
 	scroller.addEventListener("scroll", group.onScroll, { passive: true });
-	window.addEventListener("resize", group.onScroll, { passive: true });
+	// the scroller's own window, not the main one: a popout is a separate window, and resizing
+	// it has to re-place the elements inside it
+	group.win.addEventListener("resize", group.onScroll, { passive: true });
 
 	groups.set(scroller, group);
 	return group;
@@ -136,7 +143,7 @@ function unregister(scroller: Element, entry: StickyEntry) {
 	if (group.rafId !== null) cancelAnimationFrame(group.rafId);
 	group.observer.disconnect();
 	scroller.removeEventListener("scroll", group.onScroll);
-	window.removeEventListener("resize", group.onScroll);
+	group.win.removeEventListener("resize", group.onScroll);
 	groups.delete(scroller);
 }
 

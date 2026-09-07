@@ -546,6 +546,8 @@ function tailInsets(row: HTMLElement, badge: HTMLElement, tail: HTMLElement): St
 function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLElement, ctx: MarkdownPostProcessorContext) {
 
 	let scroller: Element | null = null;
+	// kept rather than read back from the scroller at teardown - see ScrollerGroup in sticky.ts
+	let scrollerWin: Window | null = null;
 	let rafId: number | null = null;
 
 	const update = () => {
@@ -571,7 +573,11 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 		if (!scroller) return;
 
 		scroller.addEventListener("scroll", scheduleUpdate, { passive: true });
-		window.addEventListener("resize", scheduleUpdate, { passive: true });
+
+		// the scroller's own window - see the same call in sticky.ts
+		scrollerWin = scroller.win;
+		scrollerWin.addEventListener("resize", scheduleUpdate, { passive: true });
+
 		update();
 	};
 
@@ -581,8 +587,9 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 			rafId = null;
 		}
 		scroller?.removeEventListener("scroll", scheduleUpdate);
-		window.removeEventListener("resize", scheduleUpdate);
+		scrollerWin?.removeEventListener("resize", scheduleUpdate);
 		scroller = null;
+		scrollerWin = null;
 		icon.setCssStyles({ transform: "" });
 	};
 
