@@ -8,10 +8,8 @@ const { minAppVersion } = manifest;
 manifest.version = targetVersion;
 writeFileSync("manifest.json", JSON.stringify(manifest, null, "\t"));
 
-// update versions.json with target version and minAppVersion from manifest.json
-// but only if the target version is not already in versions.json
+// every released version gets an entry, unconditionally: versions.json is what tells an older
+// app which plugin version it can still install, so a release missing from it is invisible there
 const versions = JSON.parse(readFileSync('versions.json', 'utf8'));
-if (!Object.values(versions).includes(minAppVersion)) {
-    versions[targetVersion] = minAppVersion;
-    writeFileSync('versions.json', JSON.stringify(versions, null, '\t'));
-}
+versions[targetVersion] = minAppVersion;
+writeFileSync('versions.json', JSON.stringify(versions, null, '\t'));

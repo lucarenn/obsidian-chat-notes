@@ -51,6 +51,11 @@ export default class ChatNotesPlugin extends Plugin {
 	private replyTargets = new Map<string, string>();
 	private replyTargetStyleEl: HTMLStyleElement | null = null;
 
+	/* Timers the plugin can take back - see `later` and the scroll loop below. Obsidian reclaims
+	   neither, and a callback that lands after onunload runs against a plugin that is gone. */
+	private timeouts = new Set<number>();
+	private scrollPinFrame: number | null = null;
+
 	activeEditor: {
 		container: HTMLElement;
 		restore: () => void;
@@ -385,6 +390,10 @@ export default class ChatNotesPlugin extends Plugin {
 		this.replyTargetStyleEl?.remove();
 		this.chatInputEl?.remove();
 
+		for (const id of this.timeouts) window.clearTimeout(id);
+		this.timeouts.clear();
+		if (this.scrollPinFrame !== null) cancelAnimationFrame(this.scrollPinFrame);
+
 		this.forEachMarkdownView(view => {
 			view.contentEl.classList.remove("chat-note-view");
 			removeChatViewActions(view);
@@ -534,12 +543,23 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
+	/* window.setTimeout the plugin can take back. Timers in ui.ts are left as they are - those
+	   only touch their own element, which is detached by the time they fire - but anything that
+	   reaches back into the plugin has to be cancellable: scheduleRefresh's rerender ends in
+	   handleFileSwitch, which would remount the chat input and its keymap scopes after unload. */
+	private later(fn: () => void, ms: number) {
+		const id = window.setTimeout(() => {
+			this.timeouts.delete(id);
+			fn();
+		}, ms);
+
+		this.timeouts.add(id);
+	}
+
 	// delayed until the UI and the markdown have settled: run straight out of the metadata
 	// handler it errors inside the embed-link plugin. The rerender repositions the input itself
 	scheduleRefresh(file: TFile) {
-		setTimeout(() => {
-			void this.refreshFile(file);
-		}, 300);
+		this.later(() => { void this.refreshFile(file); }, 300);
 	}
 
 	setupResizeObserver(view: MarkdownView) {
@@ -909,9 +929,11 @@ export default class ChatNotesPlugin extends Plugin {
 		const start = performance.now();
 
 		const pin = () => {
+			this.scrollPinFrame = null;
 			scrollDocument(view, "bottom");
+
 			if (performance.now() - start < SCROLL_ON_SEND_PIN_MS) {
-				requestAnimationFrame(pin);
+				this.scrollPinFrame = requestAnimationFrame(pin);
 			}
 		};
 
@@ -1032,7 +1054,7 @@ export default class ChatNotesPlugin extends Plugin {
 		if (options?.flash ?? true) {
 			const target = row;
 			target.classList.add("chat-message-scroll-flash");
-			setTimeout(() => target.classList.remove("chat-message-scroll-flash"), 900);
+			this.later(() => target.classList.remove("chat-message-scroll-flash"), 900);
 		}
 
 		return true;
@@ -1155,7 +1177,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Styling */
 
-	async applyStyles(container: HTMLElement, config: ChatConfig) {
+	applyStyles(container: HTMLElement, config: ChatConfig) {
 
 		if (config.messageBgColor) {
 			container.style.setProperty(
@@ -1284,7 +1306,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.applyConfigToContext(context, config);
 
 		for (const container of getActiveContainers(this.app, file)) {
-			await this.applyStyles(container, config);
+			this.applyStyles(container, config);
 		}
 
 		// once for the file, not once per container: it walks the rendered rows itself
