@@ -90,6 +90,21 @@
     display: none !important;
 }
 
+/* A pinned message is the same bubble in a different colour, so it swaps the two properties
+   the whole row is built from rather than restating any of the rules that consume them - the
+   bubble, its tail, the author badge and the action icons all follow. Redefined on the ROW,
+   not on .chat-message: the tail is a sibling of the bubble (it has to be, see the
+   overflow:hidden above), so a property set on the bubble would never reach it.
+
+   Set from data-pinned, and from a container property (--settings-msg-pin-color, written by
+   applyStyles) rather than per row by JS, for the reason given in the two blocks above: the
+   colour then applies to whatever is mounted, whenever it mounts. The fallbacks are the
+   defaults from settings.ts, and the contrast pick getReadableTextColor makes for them. */
+.chat-message-row[data-pinned="true"] {
+    --settings-msg-bg-color: var(--settings-msg-pin-color, #ec4e52);
+    --settings-msg-text-color: var(--settings-msg-pin-text-color, #f5f5f5);
+}
+
 .markdown-reading-view .chat-message
 {
     background-color: var(--settings-msg-bg-color, var(--color-base-20)) !important;
@@ -213,8 +228,8 @@
     cursor: pointer;
 }
 
-/* black or white, picked per bubble background in applyStyles (and per message in
-   applyMessagePinStyle, since a pinned bubble has its own color) */
+/* black or white, picked in applyStyles against whichever background this bubble uses - the
+   pinned rule above swaps both properties together, so this follows a pinned bubble too */
 .msg-author {
     background: transparent !important;
     box-shadow: none !important;

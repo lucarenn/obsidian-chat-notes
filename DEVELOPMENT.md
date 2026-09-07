@@ -153,7 +153,14 @@ They differ in **lifetime**, and that is the whole design:
 lands in two places:
 
 - **`applyStyles`** — anything visual, written as CSS custom properties (`--settings-msg-*`)
-  or classes on the *view container*, so the cascade reaches every message at once.
+  or classes on the *view container*, so the cascade reaches every message at once. **Config
+  never gets painted onto individual rows**, even when it only applies to some of them: the
+  pinned colour ships both values (`--settings-msg-pin-color` / `--settings-msg-pin-text-color`)
+  and a `[data-pinned="true"]` rule in `styles.css` picks between them, exactly as the
+  pinned-only filter and the reply outline do. A per-row sweep can only reach what is mounted,
+  and Live Preview re-inserts the DOM it cached for an off-screen block without re-running the
+  processor — so the sweep left the rest of the file on the old colour until a rerender, and the
+  inline value it wrote shadowed the container for good.
 - **`applyConfigToContext`** — the non-CSS values (`chatAuthor`, `defaultAuthorMode`) that
   the message-building code reads directly.
 

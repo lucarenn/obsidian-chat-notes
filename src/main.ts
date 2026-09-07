@@ -363,11 +363,9 @@ export default class ChatNotesPlugin extends Plugin {
 					note.lastAppliedConfig = note.configCache;
 				}
 
-				// recolour the message if its pinned - `row` and `config` are the ones for THIS
-				// file, not for whichever file happens to be focused
-				if (msg.header.extra.pinned === "true") {
-					this.applyMessagePinStyle(row, config, true)
-				}
+				// nothing to do for a pinned message either: the row carries data-pinned from
+				// createElementsHTML, and the container holds both colours, so CSS picks the
+				// pinned one on mount (see applyStyles)
 
 				/* Rendered under a child bound to THIS block, not under the plugin: anything
 				   the markdown mounts (embeds, other plugins' processors) then unloads when
@@ -753,12 +751,10 @@ export default class ChatNotesPlugin extends Plugin {
 		const pinState = await this.toggleMessagePinned(file, msgId);
 		if (pinState === null) return;
 
-		// paint every rendered copy now rather than waiting for the reparse the write
-		// triggers - the click should feel immediate
-		const config = this.getConfigCache(file);
+		/* Flip the flag on every rendered copy now rather than waiting for the reparse the write
+		   triggers - the click should feel immediate. Nothing else to paint: the bubble colour
+		   and the pinned-only filter both follow this attribute in CSS. */
 		for (const row of findMessageRows(this.app, file, msgId)) {
-			this.applyMessagePinStyle(row, config, pinState);
-			// keeps the row's own flag in step, so the pinned-only filter reacts at once
 			row.dataset.pinned = String(pinState);
 		}
 	}
@@ -1211,6 +1207,31 @@ export default class ChatNotesPlugin extends Plugin {
 			);
 		}
 
+		/* The pinned colour is a container property too, and reaches the pinned bubbles through
+		   the [data-pinned="true"] rule in styles.css, which redefines the two properties above
+		   for that row - exactly the override that used to be written onto each row by hand.
+
+		   Not painted per row, for the same reason the pinned-only filter and the reply outline
+		   aren't: Live Preview unmounts a block that scrolls far off screen and re-inserts the
+		   DOM it cached without re-running the codeblock processor. An inline value written by
+		   a sweep therefore came back stale - and, being inline, went on shadowing this cascade
+		   for good - while a row that was unmounted while the sweep ran was never touched at
+		   all. Only the rows near the viewport followed a colour change; the rest needed a
+		   rerender. A container property needs no sweep: it applies to whatever is mounted,
+		   whenever it mounts. */
+		if (config.messagePinColor) {
+			container.style.setProperty(
+				"--settings-msg-pin-color",
+				config.messagePinColor
+			);
+			// made against the PINNED background - the pick above is for the normal bubble and
+			// would be wrong whenever the two differ in brightness
+			container.style.setProperty(
+				"--settings-msg-pin-text-color",
+				getReadableTextColor(config.messagePinColor)
+			);
+		}
+
 		container.style.setProperty(
 		  "--settings-msg-corner-radius",
 		  `${config.messageCornerRadius}px`
@@ -1264,12 +1285,16 @@ export default class ChatNotesPlugin extends Plugin {
 
 	}
 
-	/* Per-message styling that the container-level cascade can't express: which gutter the
-	   author badge sits in, and the pinned bubbles that override the shared colour.
+	/* Per-message state that the container-level cascade can't express: which gutter the author
+	   badge sits in, and the row's own pinned flag.
+
+	   Colour is deliberately not here. Both bubble colours are container properties that CSS
+	   picks between on `data-pinned` (see applyStyles) - painting them per row meant the rows
+	   Live Preview had unmounted kept the old colour until a rerender.
 
 	   Walks the rendered rows rather than the message map - only rows on screen can be
 	   styled, and in a long chat they are a tiny fraction of the file. */
-	applyPerMessageStyles(file: TFile, context: ArchiveContext, config: ChatConfig) {
+	applyPerMessageStyles(file: TFile, context: ArchiveContext) {
 
 		for (const rowsById of collectMessageRows(this.app, file)) {
 			for (const [id, rows] of rowsById) {
@@ -1277,9 +1302,6 @@ export default class ChatNotesPlugin extends Plugin {
 				if (!message) continue;
 
 				const pinned = message.header.extra.pinned === "true";
-				const color = pinned
-					? config.messagePinColor
-					: config.messageBgColor;
 
 				for (const row of rows) {
 					row.classList.toggle("is-owner", context.isOwnerMessage(message));
@@ -1287,17 +1309,9 @@ export default class ChatNotesPlugin extends Plugin {
 					/* Brings the row's own pinned flag back in line with the model. The
 					   processor stamps it at render, but a block re-rendered from a model that
 					   was momentarily behind the file (right after a write) carries the old
-					   value - and the pinned-only filter matches on exactly this. */
+					   value - and both the pinned colour and the pinned-only filter match on
+					   exactly this. */
 					row.dataset.pinned = String(pinned);
-
-					// `continue`, not `return` - one colourless message must not abandon the sweep
-					if (!color) continue;
-
-					row.style.setProperty("--settings-msg-bg-color", color);
-					row.style.setProperty(
-						"--settings-msg-text-color",
-						getReadableTextColor(color)
-					);
 				}
 			}
 		}
@@ -1307,29 +1321,6 @@ export default class ChatNotesPlugin extends Plugin {
 	applyConfigToContext(context: ArchiveContext, config: ChatConfig) {
 		context.chatAuthor = config.author;
 		context.defaultAuthorMode = config.defaultAuthorMode ?? "owner";
-	}
-
-	/* Overrides the bubble colour for a pinned message. Takes the ROW, not the
-	   bubble: the speech-bubble tail is a sibling of the bubble (it has to be - see
-	   .chat-message's overflow:hidden) so a property set on the bubble would never reach it. */
-	applyMessagePinStyle(target: HTMLElement, config: ChatConfig, isPinned: boolean){
-
-		const color = isPinned
-			? config.messagePinColor
-			: config.messageBgColor;
-
-		if (!color) return;
-
-		target.style.setProperty(
-			"--settings-msg-bg-color",
-			color
-		);
-		// re-made against *this* background - the container-level pick is for the normal
-		// bubble color and would be wrong whenever the two differ in brightness
-		target.style.setProperty(
-			"--settings-msg-text-color",
-			getReadableTextColor(color)
-		);
 	}
 
 	async applyConfigToFile(file: TFile){
@@ -1349,7 +1340,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 		/* Once for the file, not once per container: it walks the rendered rows itself, so
 		   running it inside the loop above just repeated the same sweep. */
-		this.applyPerMessageStyles(file, context, config);
+		this.applyPerMessageStyles(file, context);
 
 		// the pinned-only filter is a class on rows, so a re-render or a config sweep has to
 		// re-assert it - without animating, since nothing moved from the reader's point of view
@@ -1462,7 +1453,7 @@ export default class ChatNotesPlugin extends Plugin {
 		/* Rows already on screen were styled and classed from the model that just got
 		   replaced. Newly mounted rows pick this up from the processor; these are the ones
 		   that were already there. */
-		this.applyPerMessageStyles(file, context, config);
+		this.applyPerMessageStyles(file, context);
 		this.applyPinFilter(file);
 	}
 
