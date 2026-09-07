@@ -417,8 +417,18 @@ fires the metadata listener and forces a full rerender. Resolve the view by
 used to grab the *focused* editor, so acting on a message in a background leaf could write one
 file's content into another's.
 
-**The 300 ms delay in `onYAMLChange`** (before a full rerender on a chat-status change) is
-there to avoid an error in the embed-link plugin; it isn't arbitrary.
+**The 300 ms delay in `onYAMLChange`** (`scheduleRefresh`, before a full rerender) is there to
+avoid an error in the embed-link plugin; it isn't arbitrary.
+
+**`author` is the one override that rerenders.** Everything else in the config reaches the page
+through `applyConfigToFile`, but the chat owner is a *comparison*: `is-owner` (which gutter a
+message's author badge sits in) is decided per message against it and stamped on the row at
+render. A sweep can only re-toggle that on mounted rows, and Live Preview re-inserts the DOM it
+cached for an off-screen block without re-running the processor, so the rest of the file kept the
+old gutter. It can't move to the container the way the two bubble colours did — CSS cannot
+compare a row to a file-level name — so `onYAMLChange` compares the *resolved* owner across
+`updateFileConfig` and calls `scheduleRefresh` when it moved. Affordable because the owner is
+normally set once per note; do not reach for this for anything that changes more often.
 
 ## Adding a setting
 
