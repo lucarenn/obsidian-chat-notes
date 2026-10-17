@@ -14,8 +14,6 @@ Why use this plugin?
 
 ## Installation
 
-Chat Notes is not in the community plugin store yet, it is awaiting review. Until then:
-
 **Manually**
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/lucarenn/obsidian-chat-notes/releases/latest).
@@ -173,4 +171,4 @@ If you find any **bugs**, please help me fix them by adding an issue on the GitH
 
 I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility in the future.
 
-> The plugin has not been tested on mobile yet.
+> The plugin has not been tested on mobile.
