@@ -1,7 +1,7 @@
 {
 	"name": "chat-notes",
 	"version": "1.0.0",
-	"description": "Obsidian chat plugin.",
+	"description": "Write messages, chats and conversations inside your Obsidian notes.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

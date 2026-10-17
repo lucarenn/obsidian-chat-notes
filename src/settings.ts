@@ -1,7 +1,5 @@
-import {App, PluginSettingTab, Setting, TFile} from "obsidian";
+import { App, PluginSettingTab, Setting, TFile } from "obsidian";
 import ChatNotesPlugin from "./main";
-
-
 
 // which author an empty author field falls back to: the chat owner (YAML `author`) or
 // whoever sent the previous message
@@ -19,7 +17,7 @@ export interface ChatConfig {
 	showMessageTimestamp?: boolean;
 	showAuthorBadges?: boolean;
 	scrollOnSend?: boolean;
-    messageCornerRadius?: number;
+	messageCornerRadius?: number;
 	author?: string;
 	messagePinColor?: string;
 	messageFlashColor?: string;
@@ -36,7 +34,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	showMessageTimestamp: boolean;
 	showAuthorBadges: boolean;
 	scrollOnSend: boolean;
-    messageCornerRadius: number;
+	messageCornerRadius: number;
 	messagePinColor: string;
 	messageFlashColor: string;
 	messageReplyColor: string;
@@ -73,28 +71,28 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 
 
 export class ChatNotesSettingTab extends PluginSettingTab {
-    plugin: ChatNotesPlugin;
+	plugin: ChatNotesPlugin;
 
-    constructor(app: App, plugin: ChatNotesPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
-    }
+	constructor(app: App, plugin: ChatNotesPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
 
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
 
-        new Setting(containerEl)
-            .setName("Message background color")
-            .setDesc("Determines the background color of message bubbles")
-            .addColorPicker(color => {
-                color
-                    .setValue(this.plugin.settings.messageBgColor)
-                    .onChange(async (value) => {
-                        this.plugin.settings.messageBgColor = value;
-                        await this.plugin.saveSettings();
-                    });
-            });
+		new Setting(containerEl)
+			.setName("Message background color")
+			.setDesc("Determines the background color of message bubbles")
+			.addColorPicker(color => {
+				color
+					.setValue(this.plugin.settings.messageBgColor)
+					.onChange(async (value) => {
+						this.plugin.settings.messageBgColor = value;
+						await this.plugin.saveSettings();
+					});
+			});
 
 		new Setting(containerEl)
 		.setName("Message pin color")
@@ -270,7 +268,7 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 		});
-    }
+	}
 }
 
 
@@ -356,14 +354,11 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 export function resolveConfig(
 	global: ChatNotesPluginSettings,
 	overrides: ChatConfig
-  ): ChatConfig {
+): ChatConfig {
 	return {
-	  ...global,
-	  ...Object.fromEntries(
-		Object.entries(overrides).filter(([_, v]) => v !== undefined)
-	  ),
+		...global,
+		...Object.fromEntries(
+			Object.entries(overrides).filter(([_, v]) => v !== undefined)
+		),
 	};
 }
-
-
-

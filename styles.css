@@ -113,7 +113,7 @@
     background-color: transparent;
 }
 
-/* Make common embed blocks gaps in preview mode the same as in reading mode*/
+/* Give embed blocks the same spacing in Live Preview as in Reading view */
 .chat-note-view .cm-editor .embed,
 .chat-note-view .cm-editor .block-language-img-gallery {
     margin-top: 15px !important;
@@ -351,7 +351,7 @@
 /* --------------------------------*/
 
 .chat-input-container {
-    position: absolute; /* fixed; ? */
+    position: absolute;
     bottom: 0;
     left: 0;
     right: 0;

@@ -1,8 +1,8 @@
 import { MarkdownRenderer, MarkdownRenderChild, MarkdownPostProcessorContext, setIcon, Notice, TFile, MarkdownView, Scope } from "obsidian";
-import { ConfirmDeleteModal } from "./modals"
-import { MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types"
-import { scrollDocument, isValidTimestamp, clampBackticks, TIMESTAMP_PLACEHOLDER } from "./util"
-import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky"
+import { ConfirmDeleteModal } from "./modals";
+import { MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types";
+import { scrollDocument, isValidTimestamp, clampBackticks, TIMESTAMP_PLACEHOLDER } from "./util";
+import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky";
 import type ChatNotesPlugin from "./main";
 
 
@@ -340,11 +340,11 @@ export function addScrollButtons(view: MarkdownView) {
 	if (!view) return;
 
 	addViewAction(view, "arrow-up", "Scroll to top", () => {
-		scrollDocument(view, "top")
+		scrollDocument(view, "top");
 	});
 
 	addViewAction(view, "arrow-down", "Scroll to bottom", () => {
-		scrollDocument(view, "bottom")
+		scrollDocument(view, "bottom");
 	});
 }
 
@@ -385,8 +385,8 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 
 	/* Baked into the node so the pinned-only filter is pure CSS (see .msg-pinned-only).
 	   It cannot be a class toggled by a sweep: Live Preview unmounts blocks that scroll far
-	   off screen and re-inserts the cached DOM when they return without re-running this
-	   processor, so swept rows came back unfiltered and unmounted ones were never swept. */
+	   off screen and re-inserts the cached DOM without re-running this processor, so a sweep
+	   would miss every row that isn't mounted at the time. */
 	row.dataset.pinned = String(msg.header.extra.pinned === "true");
 
 	const wrapper = document.createElement("div");
@@ -395,7 +395,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	const content = document.createElement("div");
 	content.className = "message-content";
 
-	/* Create Action Menu with Copy, Delete and Edit Button */
+	/* Create the action menu with edit, delete, copy and pin buttons */
 	const { menu } = createMessageActionsMenu({
 		plugin,
 		ctx,
@@ -661,7 +661,7 @@ function createMessageActionsMenu({
 	onPin
 } : CreateMenuParams) {
 
-    const filePath = ctx.sourcePath;
+	const filePath = ctx.sourcePath;
 	const app = plugin.app;
 
 	const menu = document.createElement("div");
@@ -709,18 +709,15 @@ function createMessageActionsMenu({
 	});
 
 	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
-	menu.append(buttonContainer, menuBtn)
+	menu.append(buttonContainer, menuBtn);
 
-    /* ---------------- COPY ---------------- */
+	/* ---------------- COPY ---------------- */
 
-	/* Outside the handler, so a second copy cancels the first button's pending reset - and a
-	   real timer handle: clearing Number(msg.header.id) cancelled whatever unrelated timer the
-	   browser had handed that same small integer to.
-
-	   Not routed through the plugin's `later`: this one only sets an icon on its own button. */
+	/* Outside the handler, so a second copy cancels the first one's pending icon reset. Not
+	   routed through the plugin's `later`: this one only sets an icon on its own button. */
 	let resetTimer: number | undefined;
 
-    copyBtn.addEventListener("click", () => {
+	copyBtn.addEventListener("click", () => {
 		void (async () => {
 			await navigator.clipboard.writeText(msg.content);
 
@@ -743,9 +740,9 @@ function createMessageActionsMenu({
 			new Notice("Copied message");
 
 		})();
-    });
+	});
 
-    /* ---------------- DELETE ---------------- */
+	/* ---------------- DELETE ---------------- */
 	deleteBtn.addEventListener("click", (e) => {
 
 		void (async () => {
@@ -786,119 +783,119 @@ function createMessageActionsMenu({
 	editBtn.addEventListener("click", (e) => {
 
 		void (async () => {
-				e.stopPropagation();
+			e.stopPropagation();
 
-				if (plugin.activeEditor?.container === content.firstChild) {
-					return;
-				}
+			if (plugin.activeEditor?.container === content.firstChild) {
+				return;
+			}
 
-				const file = app.vault.getAbstractFileByPath(filePath);
-				if (!(file instanceof TFile)) return;
+			const file = app.vault.getAbstractFileByPath(filePath);
+			if (!(file instanceof TFile)) return;
 
-				/* No file read to open the editor: the rendered message already carries its
-				   own body. The file is only touched on save, and the block is re-located by
-				   id then - so an edit made while the note shifted underneath still lands on
-				   the right message. */
-				const textarea = document.createElement("textarea");
-				textarea.className = "msg-inline-editor";
-				textarea.value = msg.content;
+			/* No file read to open the editor: the rendered message already carries its
+			   own body. The file is only touched on save, and the block is re-located by
+			   id then - so an edit made while the note shifted underneath still lands on
+			   the right message. */
+			const textarea = document.createElement("textarea");
+			textarea.className = "msg-inline-editor";
+			textarea.value = msg.content;
 
+			textarea.setCssStyles({ height: "auto" });
+			textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
+
+			const saveBtn = document.createElement("button");
+			saveBtn.textContent = "Save";
+			saveBtn.className = "msg-btn msg-editor-save-btn";
+
+			const cancelBtn = document.createElement("button");
+			cancelBtn.textContent = "Cancel";
+			cancelBtn.className = "msg-btn msg-editor-cancel-btn";
+
+			const btnRow = document.createElement("div");
+			btnRow.className = "msg-editor-buttons";
+			btnRow.append(saveBtn, cancelBtn);
+
+			const editorWrapper = document.createElement("div");
+			editorWrapper.className = "msg-editor-wrapper";
+			editorWrapper.append(textarea, btnRow);
+
+			const restore = () => {
+				content.empty();
+				content.appendChild(originalContent);
+				plugin.clearActiveEditor({ container: editorWrapper });
+			};
+
+			// closes whichever editor was open before this one
+			plugin.handleOpenEditor({
+				container: editorWrapper,
+				restore
+			});
+
+			const originalContent = content.cloneNode(true);
+			content.empty();
+			content.appendChild(editorWrapper);
+			textarea.focus();
+
+			const autoResize = () => {
 				textarea.setCssStyles({ height: "auto" });
 				textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
+			};
+			textarea.addEventListener("input", autoResize);
+			autoResize();
 
-				const saveBtn = document.createElement("button");
-				saveBtn.textContent = "Save";
-				saveBtn.className = "msg-btn msg-editor-save-btn";
+			cancelBtn.addEventListener("click", () => {
+				restore();
+			});
 
-				const cancelBtn = document.createElement("button");
-				cancelBtn.textContent = "Cancel";
-				cancelBtn.className = "msg-btn msg-editor-cancel-btn";
+			saveBtn.addEventListener("click", () => {
 
-				const btnRow = document.createElement("div");
-				btnRow.className = "msg-editor-buttons";
-				btnRow.append(saveBtn, cancelBtn);
+				void (async () => {
+					// same fence guard the chat input applies on send - an edit writes to
+					// the file through the same block and breaks it the same way
+					const newContent = clampBackticks(textarea.value);
 
-				const editorWrapper = document.createElement("div");
-				editorWrapper.className = "msg-editor-wrapper";
-				editorWrapper.append(textarea, btnRow)
+					/* The header is taken from the file's own copy of the block, not from
+					   the message this menu was built for - so a header edited elsewhere
+					   in the meantime survives the save instead of being written back
+					   stale. The trailing "" from toString()'s final newline is dropped,
+					   or every save would grow a blank line. */
+					await plugin.withMessageBlock(file, msg.header.id, ({ message }) =>
+						message
+							.setContent(newContent)
+							.toString()
+							.replace(/\n$/, "")
+							.split("\n")
+					);
 
-				const restore = () => {
+					// re-rendered here rather than left to the write's own re-render, so the
+					// bubble updates the moment Save is pressed
 					content.empty();
-					content.appendChild(originalContent);
+
+					// bound to this block, not to the plugin - see the processor in main.ts
+					const renderChild = new MarkdownRenderChild(content);
+					ctx.addChild(renderChild);
+
+					await MarkdownRenderer.render(
+						app,
+						newContent,
+						content,
+						filePath,
+						renderChild
+					);
+
 					plugin.clearActiveEditor({ container: editorWrapper });
-				};
+				})();
 
-				// closes whichever editor was open before this one
-				plugin.handleOpenEditor({
-					container: editorWrapper,
-					restore
-				});
-
-				const originalContent = content.cloneNode(true);
-				content.empty();
-				content.appendChild(editorWrapper);
-				textarea.focus();
-
-				const autoResize = () => {
-					textarea.setCssStyles({ height: "auto" });
-					textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
-				};
-				textarea.addEventListener("input", autoResize);
-				autoResize();
-
-				cancelBtn.addEventListener("click", () => {
-					restore();
-				});
-
-				saveBtn.addEventListener("click", () => {
-
-					void (async () => {
-						// same fence guard the chat input applies on send - an edit writes to
-						// the file through the same block and breaks it the same way
-						const newContent = clampBackticks(textarea.value)
-
-						/* The header is taken from the file's own copy of the block, not from
-						   the message this menu was built for - so a header edited elsewhere
-						   in the meantime survives the save instead of being written back
-						   stale. The trailing "" from toString()'s final newline is dropped,
-						   or every save would grow a blank line. */
-						await plugin.withMessageBlock(file, msg.header.id, ({ message }) =>
-							message
-								.setContent(newContent)
-								.toString()
-								.replace(/\n$/, "")
-								.split("\n")
-						);
-
-						// re-rendered here rather than left to the write's own re-render, so the
-						// bubble updates the moment Save is pressed
-						content.empty();
-
-						// bound to this block, not to the plugin - see the processor in main.ts
-						const renderChild = new MarkdownRenderChild(content);
-						ctx.addChild(renderChild);
-
-						await MarkdownRenderer.render(
-							app,
-							newContent,
-							content,
-							filePath,
-							renderChild
-						);
-
-						plugin.clearActiveEditor({ container: editorWrapper });
-					})();
-
-				});
-			})();
-		});
+			});
+		})();
+	});
 
 	return {
 		menu,
 		wrapper,
 		content
 	};
-};
+}
 
 async function copyHeaderText(text: string, noticeText: string) {
 	await navigator.clipboard.writeText(text);
@@ -936,5 +933,5 @@ function createMessageHeader(authorText: string, timestampText: string, menu: HT
 	meta.append(author, timestamp);
 	header.append(meta, menu);
 
-	return header
-};
+	return header;
+}

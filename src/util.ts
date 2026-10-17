@@ -1,5 +1,5 @@
-import { MarkdownView, App, TFile, TAbstractFile} from "obsidian";
-import { Message, MessageEntry, MessageBlock } from "./types"
+import { MarkdownView, App, TFile, TAbstractFile } from "obsidian";
+import { Message, MessageEntry, MessageBlock } from "./types";
 
 
 export function isChatFile(app: App, file: TFile): boolean {
@@ -122,8 +122,8 @@ export function formatTimestamp(date: Date = new Date()): string {
 		+ ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/* A message body lives inside a four-backtick fence, so four or more backticks in the message
-	content close it early, therefore longer runs of backticks are shortened to 3. */
+/* A message body lives inside a four-backtick fence, so a run of four or more backticks in it
+   would close the block early. Such runs are shortened to three. */
 export const MAX_CONTENT_BACKTICKS = 3;
 
 export function clampBackticks(content: string): string {
@@ -175,7 +175,7 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 	let currentBlock: string[] = [];
 	let currentStartLine = 0;
 	let currentLastLine = -1;
-	let pinnedMessageCounter = 0
+	let pinnedMessageCounter = 0;
 
 	for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 		const line = lines[lineNumber];
@@ -213,8 +213,8 @@ export function parseMessages(source: string): [Map<string, MessageEntry>, numbe
 					}
 				);
 
-				if(message.header.extra.pinned === "true") {
-					pinnedMessageCounter += 1
+				if (message.header.extra.pinned === "true") {
+					pinnedMessageCounter += 1;
 				}
 
 			} catch (e) {

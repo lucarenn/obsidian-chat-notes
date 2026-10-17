@@ -5,12 +5,12 @@ A messenger plugin to write messages, chats and conversations inside Obsidian.
 ![plugin demo](/images/demo.gif)
 
 What does this plugin add?
-- This plugin adds chat notes, that behave just like you would expect from a messenger chat: they have an input field to write new messages and a system to render and display the messages. You can reply, pin, copy, edit, delete and much more. All other notes will still work just like normal.
+- This plugin adds chat notes that behave just like you would expect from a messenger chat: they have an input field to write new messages and a system to render and display them. You can reply, pin, copy, edit, delete and much more. All other notes will still work just like normal.
 
 Why use this plugin?
-- This plugin was originally designed to export private Discord servers into Obsidian, however, it can be used independently. If you like to draft dialogues or like a message-based note system, where it's easy to separate and see the timestamps of your ideas in the same file, then this plugin might be for you.
+- This plugin was originally designed to export Discord servers into Obsidian, but it can be used independently. If you like to draft dialogues or like a message-based note system, where it's easy to separate and see the timestamps of your ideas in the same file, then this plugin might be for you.
 
-    > Backup your data before importing (the plugin allows changing ids, deleting or modifying the data)
+    > Backup your (Discord) data before importing (the plugin allows changing ids, deleting or modifying the data)
 
 ## Installation
 
@@ -42,11 +42,11 @@ author: Some Name
 
 `type: chat-note` is what the plugin looks for. Without it a note renders normally, and every message block in it stays a plain code block.
 
-> You can leave the author field blank or skip it entirely; however, this results in all messages being sent with an empty author attribute by default. If you simply do not wish to display the author, it is better to specify the author anyway and disable the display separately in the settings.
+> You can leave the author field blank or skip it entirely. However, this results in all messages being sent with an empty author attribute by default. If you simply do not wish to display the author, it is better to specify the author anyway and disable the display separately in the settings.
 
 ## Writing messages
 
-Messages are written in markdown and render as such, code blocks included.
+Messages are written and render as markdown (code blocks included).
 
 > **Backticks:** a message is stored inside a four-backtick block, so a longer run of backticks
 > inside a message would close it early and break the note. Runs of four or more backticks are
@@ -66,11 +66,8 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 
 ## Commands
 
-There are a handful of commands that make your life easier working with this plugin.
-Every command except **Create new chat note** is only available inside a chat note.
-No default hotkeys are set, you can assign your own under **Settings → Hotkeys**.
-Having shortcuts to move the cursor into the input field or scroll to top/bottom 
-makes it much faster working with chat files, without the hands having to leave the keyboard.
+There are a handful of commands that make your life easier working with the plugin.
+You can use these to speed up your workflow by setting a hotkey for them:
 
 | Command |
 | --- |
@@ -80,6 +77,11 @@ makes it much faster working with chat files, without the hands having to leave 
 | Scroll to top |
 | Add override properties |
 | Recalculate message ids |
+
+Every command except **Create new chat note** is only available inside a chat note.
+No default hotkeys are set, you can assign your own under **Settings → Hotkeys**.
+Having shortcuts to move the cursor into the input field or scroll to top/bottom 
+makes it much faster working with chat files.
 
 > You can still assign **Scroll to top** to `Mod` + `↑`. Just note that when the chat input is focused, the combination will open or close the author/time row instead.
 
@@ -96,7 +98,7 @@ The plugin also checks for duplicates when it first reads a chat note and notifi
 ## Overriding global settings per chat note
 
 Global settings live under **Settings → Community plugins → Chat Notes**.
-Here many features like various colors, corner radius, visible attributes in the message header, 
+Here, many features like various colors, corner radius, visible attributes in the message header, 
 input width and height, default author, ribbon icon visibility and more can be adjusted.
 By default these apply to *all* chat notes. If you want **different settings for individual chats**, 
 you can override most of the settings per file by adding the matching key to that note's frontmatter:
@@ -118,11 +120,11 @@ You don't have to type any of this out. Run the **Add override properties** comm
 note and every override key is added to its frontmatter with an empty value. An empty key
 changes nothing, so the note keeps using your global settings until you fill one in.
 
-Keys the note already has are left untouched, values and all, so the command is safe to run
-again at any time; it only ever adds what is missing.
+Keys and values the note already has are left untouched, so the command is safe to run
+again at any time; it only adds the missing keys.
 
-> Running it **once in a vault** is also what teaches Obsidian's property autocomplete these
-> keys. After that, every key is suggested to you as you type in any note's properties, so you don't need to look them up.
+> It is recommended to run it at least **once after install**, which enables Obsidian to autocomplete the keys (you can delete the generated keys afterwards if you want).
+> After that, every key is suggested to you as you type in any note's properties, so you don't need to look them up.
 
 A few things to know:
 
@@ -130,7 +132,7 @@ A few things to know:
 - All changes should apply live; if not, try refreshing the view or reopening the note.
 - A typo or an empty key is ignored and will still use its global setting value.
 - Colors accept any CSS color: `#2b5d8a`, `#abc`, `white`, `rgb(43 93 138)` etc.
-    - If you **paste** the frontmatter directly into the file or **manually write** it (i.e. it's a blank file or has no properties added yet) use quotes for values starting with `#`, or YAML reads them as a comment. Also make sure that the first `---` is at the very top of the file (no empty line above), or Obsidian will not recognize the values as properties. If done correctly, Obsidian should format the frontmatter into a properties table. There are other ways to add properties to a file as well (for example via command); refer to Obsidian's info page about [Properties](https://obsidian.md/help/properties).
+    - If you **paste** the frontmatter directly into the file or **manually write** it (i.e. it's a blank file or has no properties added yet) use quotes for values starting with `#`, or YAML reads them as a comment. Also make sure that the first `---` is at the very top of the file (no empty line above), or Obsidian will not recognize the values as properties. If done correctly, Obsidian should format the frontmatter into a properties table. There are other ways to add properties to a file as well (Obsidian offers a command). Refer to Obsidian's info page about [Properties](https://obsidian.md/help/properties).
     - If you input a value starting with `#` via the properties table or with the command (once Obsidian has recognized the keys) you should **not** use quotes, just put the value as is.
 
 ### Available overrides
@@ -151,7 +153,7 @@ A few things to know:
 | `msgScrollOnSend` | `true` / `false` | Scroll to bottom on send |
 | `msgDefaultAuthor` | `owner` / `previous` | Default message author |
 
-Out-of-range numbers are clamped rather than ignored: `msgCornerRadius: 999` gives 50.
+Out-of-range numbers are clamped: `msgCornerRadius: 999` gives 50.
 
 ### Global-only settings
 
@@ -169,4 +171,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility in the future. The plugin has not been tested on mobile yet.
+I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility in the future.
+
+> The plugin has not been tested on mobile yet.

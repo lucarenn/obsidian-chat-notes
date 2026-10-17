@@ -1,8 +1,8 @@
 import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
-import { Header, Message, ChatNote, ArchiveContext } from "./types"
-import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings"
-import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui"
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util"
+import { Header, Message, ChatNote, ArchiveContext } from "./types";
+import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings";
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui";
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util";
 import { ConfirmModal } from "./modals"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
@@ -313,7 +313,7 @@ export default class ChatNotesPlugin extends Plugin {
 				/* A message the parse hasn't seen yet - typed by hand, pasted, or appended a
 				   moment ago - is read straight from `source` rather than forcing a reparse.
 				   Live Preview re-runs this callback on every keystroke while a block is being
-				   typed, so throwing on an unknown id fired once per character. */
+				   typed, so an unknown id must not throw. */
 				let msg: Message;
 				try {
 					const id = extractMessageIdFromSource(source);
@@ -371,8 +371,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 				/* Rendered under a child bound to THIS block, not under the plugin: anything
 				   the markdown mounts (embeds, other plugins' processors) then unloads when
-				   the block does. Passing the plugin kept every message ever rendered alive
-				   until the plugin unloaded. */
+				   the block does, instead of living until the plugin unloads. */
 				const renderChild = new MarkdownRenderChild(content);
 				ctx.addChild(renderChild);
 
@@ -387,10 +386,9 @@ export default class ChatNotesPlugin extends Plugin {
 			}
 		);
 
-		/* The file already open at load: whether its own file-open landed before the listener
-		   above existed is a race, so run the switch by hand. Without it currentFile stays null,
-		   and both save paths are gated on it - keystrokes on the first note of a session were
-		   cached nowhere. */
+		/* The file already open at load: its own file-open may have fired before the listener
+		   above existed, so run the switch by hand. Without it currentFile stays null, and the
+		   input's draft cache is gated on it. */
 		this.app.workspace.onLayoutReady(() => this.handleFileSwitch());
 	}
 
@@ -522,7 +520,7 @@ export default class ChatNotesPlugin extends Plugin {
 		// blank `author:` a new note is created with reads the same as no key at all
 		const previousAuthor = note.configCache?.author;
 
-		// safe new config metadata changes to cache (this re-seeds yamlCache with the above)
+		// caches the new config, and re-seeds yamlCache with the frontmatter above
 		this.updateFileConfig(file);
 
 		const ownerChanged = previousAuthor !== note.configCache?.author;
@@ -552,7 +550,7 @@ export default class ChatNotesPlugin extends Plugin {
 			if (ownerChanged) this.scheduleRefresh(file);
 
 		} else if (currentStatus !== previousStatus) {
-			// chat status has changed -> rerender completly
+			// chat status has changed -> rerender completely
 			this.scheduleRefresh(file);
 		}
 
@@ -609,7 +607,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 		/* And the elements the geometry is actually read from: contentEl resizes first and
 		   CodeMirror re-measures its own container a beat later, so watching contentEl alone
-		   measured the old box and left the input off-centre. The hidden subview's sizer
+		   would measure the old box. The hidden subview's sizer
 		   measures 0x0, which updateChatInputPosition already bails on. */
 		for (const selector of Object.values(INPUT_SIZER_SELECTORS)) {
 			const sizer = view.containerEl.querySelector(selector);
@@ -635,8 +633,8 @@ export default class ChatNotesPlugin extends Plugin {
 		const input = this.getChatInput();
 
 		/* Picked by mode, never by a `||` fallback: Obsidian keeps BOTH subviews mounted and
-		   hides the inactive one, so the hidden element still exists and measures 0x0 - which
-		   collapsed the input and threw it to the left. Each selector is scoped to its own
+		   hides the inactive one, so the hidden element still exists and measures 0x0, which
+		   would collapse the input. Each selector is scoped to its own
 		   subview so a theme's stray sizer can't win. */
 		const inner = view.containerEl.querySelector(
 			view.getMode() === "preview"
@@ -840,9 +838,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Records which message a file's pending reply points at, and rewrites the stylesheet that
 	   marks it. Nothing touches the rows: a generated rule styles whichever row matches,
-	   whenever it mounts, so it survives Live Preview re-inserting a cached row. Clearing
-	   matters just as much - a class removed by hand can't reach an unmounted row, which is
-	   how the old target kept its outline while the new one got none. */
+	   whenever it mounts, so it survives Live Preview re-inserting a cached row - and clearing
+	   the rule reaches unmounted rows too, which removing a class by hand can't. */
 	private setReplyTarget(file: TFile, msgId: string | undefined) {
 		if (msgId) this.replyTargets.set(file.path, msgId);
 		else this.replyTargets.delete(file.path);
@@ -1262,8 +1259,8 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 
 		container.style.setProperty(
-		  "--settings-msg-corner-radius",
-		  `${config.messageCornerRadius}px`
+			"--settings-msg-corner-radius",
+			`${config.messageCornerRadius}px`
 		);
 
 		// the input stays rounder than the bubbles, but tracks the same setting.
@@ -1392,8 +1389,8 @@ export default class ChatNotesPlugin extends Plugin {
 	}
 
 	/* The message textarea itself, never a query for it: the container also holds the author and
-	   timestamp override fields, which come first in the DOM, so a "textarea, input" selector
-	   list resolved to the author field and drafts were saved there instead.
+	   timestamp override fields, which come first in the DOM, so a "textarea, input" query
+	   would resolve to the author field.
 
 	   Both tolerate the input not existing yet - getChatInput builds it lazily. */
 	getInputValue(): string {
@@ -1408,16 +1405,16 @@ export default class ChatNotesPlugin extends Plugin {
 		this.chatTextareaEl.dispatchEvent(new Event("input"));
 	}
 
-    getChatNote(file: TFile): ChatNote {
-        let note = this.chatNotes.get(file);
+	getChatNote(file: TFile): ChatNote {
+		let note = this.chatNotes.get(file);
 
-        if (!note) {
-            note = new ChatNote(file);
-            this.chatNotes.set(file, note);
-        }
+		if (!note) {
+			note = new ChatNote(file);
+			this.chatNotes.set(file, note);
+		}
 
-        return note;
-    }
+		return note;
+	}
 
 	getConfigCache(file: TFile){
 		let config = this.getChatNote(file).configCache;
@@ -1425,7 +1422,7 @@ export default class ChatNotesPlugin extends Plugin {
 			config = this.updateFileConfig(file);
 			this.getChatNote(file).configCache = config;
 			if (config === undefined) {
-				throw Error("unexpected Error: File could not update config. File might not be a TFile")
+				throw new Error("Could not resolve the config: file is not a TFile");
 			}
 		}
 		return config;
@@ -1472,7 +1469,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 	async getArchiveContext(file: TFile): Promise<ArchiveContext> {
 
- 		// the promise is cached, not the context: the codeblock processor runs concurrently
+		// the promise is cached, not the context: the codeblock processor runs concurrently
 		// for every message, and would otherwise build one context per message
 		let contextPromise = this.archiveContexts.get(file.path);
 		if (!contextPromise) {
@@ -1492,7 +1489,7 @@ export default class ChatNotesPlugin extends Plugin {
 	   Locates the block by **id, in the text it is about to modify** - never from a cached line
 	   number. Any edit above a message shifts its lines, and the model can lag the file by a
 	   metadata debounce, so a write keyed off `entry.startLine` could splice into a different
-	   message's header. That was silent corruption.
+	   message's header.
 
 	   Reads through the open editor when there is one: unsaved changes haven't reached disk, so
 	   vault.read would return superseded text and clobber what the user just typed. Writing back

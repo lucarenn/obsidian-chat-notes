@@ -1,8 +1,8 @@
 # Chat Notes — developer notes
 
 Internal notes on how the plugin is built. `README.md` covers what it does for users;
-`AGENTS.md` covers generic Obsidian plugin tooling. This file covers *this* codebase:
-the flow, the structure, and a few non-obvious solutions that are easy to break
+`AGENTS.md` covers generic Obsidian plugin tooling. This file covers the codebase:
+the flow, the structure and a few non-obvious solutions that are easy to break
 by accident.
 
 ## Getting set up
@@ -89,7 +89,7 @@ Two things to know before adding to them:
 | `sticky.ts` | Manual `position: sticky` for gutter elements (see quirks) |
 | `modals.ts` | Delete-confirmation modal |
 | `styles.css` | All styling; consumes the `--settings-*` custom properties set from `main.ts` |
-| `tests/` | Vitest coverage of the file-format layer (see below) |
+| `tests/` | Vitest coverage of the file-format layer (see [Tests](#tests)) |
 
 ## How a chat note renders
 
@@ -324,7 +324,8 @@ its rounded silhouette) would cut it off.
 
 `chat-message-scroll-flash` is the one remaining state *class* on the row, and it can be:
 it is transient (900 ms), so nothing has to survive an unmount. Everything durable is a data
-attribute or a generated rule, for the reason two entries below.
+attribute or a generated rule, for the reason given under "Live Preview re-inserts cached rows"
+below.
 
 **Borders are `box-shadow`.** `overflow: hidden` clips an element's children but never its
 own border, so a real border would show through as a ring behind the flush reply banner.
@@ -441,8 +442,9 @@ emits `id` first), while `findMessageBlocks` searches the whole header, because
 an indented key and the other doesn't, that block keeps its old id and collides with the new
 numbering.
 
-Headers are patched line by line rather than re-serialised, for the reason `toggleMessagePinned`
-patches. The write replaces from the first block to the end of the document: dropping a
+Headers are patched line by line rather than re-serialised, as `toggleMessagePinned` does:
+round-tripping through `Message.toString()` would reorder the header keys and renormalise the
+body, a large, surprising diff for a change to one line. The write replaces from the first block to the end of the document: dropping a
 `reply_to` changes the line count, so the blocks' own `endLine` no longer describes the patched
 text. The duplicate notice fires from `createArchiveContext` only — `invalidateArchiveContext`
 runs on every save, and a block being typed passes through states where its id repeats another.

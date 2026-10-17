@@ -1,7 +1,7 @@
 import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig, DefaultAuthorMode } from "./settings";
 import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
-import ChatNotesPlugin from "./main"
+import ChatNotesPlugin from "./main";
 
 
 /* A parsed chat file: everything derivable from its text, and nothing else. No DOM references,
@@ -12,8 +12,8 @@ import ChatNotesPlugin from "./main"
    what makes "throw it away and reparse" safe: a caller holding an older context across an await
    sees a consistent snapshot rather than a half-updated one. */
 export class ArchiveContext {
-    file: TFile;
-	messageMap: Map<string, MessageEntry>
+	file: TFile;
+	messageMap: Map<string, MessageEntry>;
 
 	// all derived from the messages, rebuilt together by refreshMessageIndex
 	authors: Set<string> = new Set();
@@ -25,11 +25,11 @@ export class ArchiveContext {
 	chatAuthor?: string;
 	defaultAuthorMode: DefaultAuthorMode = "owner";
 
-    constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>) {
-        this.file = file;
-        this.messageMap = msgEntryMap;
+	constructor(file: TFile, msgEntryMap: Map<string, MessageEntry>) {
+		this.file = file;
+		this.messageMap = msgEntryMap;
 		this.refreshMessageIndex();
-    }
+	}
 
 	// messageMap keeps the file's order, so the last entry with an author is the newest one
 	refreshMessageIndex() {
@@ -57,8 +57,7 @@ export class ArchiveContext {
 		this.authors = authors;
 		this.lastAuthor = lastAuthor;
 		this.maxMessageId = maxMessageId;
-		// counted, never incremented by hand - a running total was a second thing to keep
-		// in step with the file, and it drifted whenever a message was registered twice
+		// recounted rather than kept as a running total, so it can't drift from the file
 		this.pinnedMessagesAmount = pinned;
 	}
 
@@ -114,7 +113,7 @@ export interface MessageEntry {
 }
 
 export type CreateHTMLParams = {
-    plugin: ChatNotesPlugin;
+	plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
 	msg: Message;
 	author_text: string;
@@ -128,7 +127,7 @@ export type CreateHTMLParams = {
 };
 
 export type CreateMenuParams = {
-    plugin: ChatNotesPlugin;
+	plugin: ChatNotesPlugin;
 	ctx: MarkdownPostProcessorContext;
 	msg: Message;
 	wrapper: HTMLElement;
@@ -143,7 +142,7 @@ export class Header {
 		public id: string,
 		public author: string,
 		public timestamp: string,
-		public extra: Record<string, string> = {}   // for adding addional fields
+		public extra: Record<string, string> = {}	// for adding additional fields
 	) {}
 
 	static fromLines(lines: string[]): Header {
@@ -158,7 +157,7 @@ export class Header {
 
 		const id = data["id"];
 		if (id === undefined || id === ""){
-			throw new Error("Message Header contains no ID.")
+			throw new Error("Message header contains no id");
 		}
 
 		return new Header(
@@ -196,10 +195,10 @@ export class Message {
 	) {}
 
 
-    setContent(content: string): Message{
-        this.content = content;
-        return this;
-    }
+	setContent(content: string): Message{
+		this.content = content;
+		return this;
+	}
 
 	// a body always opens and closes with a blank line - what keeps a
 	// fromString/toString round trip stable
@@ -215,7 +214,7 @@ export class Message {
 	}
 
 	static fromString(rawMessage: string): Message {
-		// expects rawMessage to NOT contain the codeblock seperators (````chat-message and ````)
+		// expects rawMessage to NOT contain the codeblock separators (````chat-message and ````)
 		const lines = rawMessage.trim().split("\n");
 
 		const separatorIndex = lines.indexOf("~~~");
