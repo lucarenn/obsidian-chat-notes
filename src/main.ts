@@ -10,8 +10,8 @@ const NEW_CHAT_NOTE_NAME = "Untitled chat";
 // what a chat-message block renders as when it can't be shown as a message: in a note that
 // isn't a chat, or while the block is still being typed and doesn't parse yet
 function renderFallbackBlock(el: HTMLElement, source: string) {
-	const fallback = document.createElement("pre");
-	const code = document.createElement("code");
+	const fallback = createEl("pre");
+	const code = createEl("code");
 
 	code.addClass("language-chat-message");
 	code.textContent = source;
@@ -568,7 +568,7 @@ export default class ChatNotesPlugin extends Plugin {
 		this.windowMigration?.();
 		this.windowMigration = null;
 
-		const win = el.win as Window & typeof globalThis;
+		const win = el.win as Window & { ResizeObserver: typeof ResizeObserver };
 
 		// one measurement per frame, the way sticky.ts batches its scroll work: a drag delivers
 		// several observation cycles across the elements below, and each pass reads two rects

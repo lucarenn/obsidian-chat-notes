@@ -12,7 +12,7 @@ let colorProbe: CanvasRenderingContext2D | null | undefined;
 
 function getColorProbe(): CanvasRenderingContext2D | null {
 	if (colorProbe === undefined) {
-		colorProbe = document.createElement("canvas").getContext("2d");
+		colorProbe = createEl("canvas").getContext("2d");
 	}
 	return colorProbe;
 }
@@ -387,7 +387,7 @@ export function getActiveContainers(app: App, file: TAbstractFile): HTMLElement[
 		if (view.file?.path !== file.path) continue;
 
 		for (const maybe of [view.previewMode?.containerEl, view.contentEl]) {
-			if (!(maybe instanceof HTMLElement)) continue;
+			if (!maybe?.instanceOf(HTMLElement)) continue;
 			const candidate: HTMLElement = maybe;
 
 			// keep only the outermost of any nested pair
@@ -422,7 +422,7 @@ function rowsFor(app: App, sourcePath: string, msgId?: string): HTMLElement[] {
 
 	for (const doc of chatDocuments(app)) {
 		for (const row of Array.from(doc.querySelectorAll(selector))) {
-			if (row instanceof HTMLElement) rows.push(row);
+			if (row.instanceOf(HTMLElement)) rows.push(row);
 		}
 	}
 

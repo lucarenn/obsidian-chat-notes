@@ -89,7 +89,7 @@ function createObserver(
 	visible: Set<StickyEntry>,
 	onChange: () => void
 ): IntersectionObserver {
-	const win = scroller.win as Window & typeof globalThis;
+	const win = scroller.win as Window & { IntersectionObserver: typeof IntersectionObserver };
 
 	return new win.IntersectionObserver(
 		(records) => {
@@ -198,11 +198,11 @@ export function registerSticky(
 	let scroller: Element | null = null;
 	let entry: StickyEntry | null = null;
 
-	// deferred a frame on purpose: the row is still detached at this point, so closest()
-	// would find no scroller at all. The row can't name its window yet either, so this uses
-	// the active one - the window the note is being rendered in
-	const win = activeWindow;
-	const frame = win.requestAnimationFrame(() => {
+	/* Deferred until the row is in the page, since closest() needs its scroller. That can be
+	   much later than the render: Reading View renders sections ahead of the viewport and only
+	   inserts them as they scroll near. Hooked on the row rather than the badge, which is
+	   display:none while badges are off and would never report its insertion. */
+	const stopWaiting = row.onNodeInserted(() => {
 		scroller = row.closest(".cm-scroller, .markdown-preview-view");
 		if (!scroller) return;
 
@@ -213,13 +213,13 @@ export function registerSticky(
 		// observing fires an immediate record, which places the element without waiting
 		// for the reader to scroll
 		group.observer.observe(row);
-	});
+	}, true);
 
 	// ties the entry's life to the rendered message: a re-render, file switch or closed
 	// leaf all unload the child, which is the only signal that the row is gone
 	const child = new MarkdownRenderChild(target);
 	child.onunload = () => {
-		win.cancelAnimationFrame(frame);
+		stopWaiting();
 		if (scroller && entry) unregister(scroller, entry);
 	};
 	ctx.addChild(child);

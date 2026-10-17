@@ -373,7 +373,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
 	// overflow. Hover is bound to the row, making bubble+gutter+button one hover zone.
-	const row = document.createElement("div");
+	const row = createEl("div");
 	row.className = "chat-message-row";
 
 	/* How every later operation finds this message again. Nothing holds a reference to the
@@ -395,10 +395,10 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	const resyncReplyTarget = () => syncReplyTarget(row, msg.header.id);
 	resyncReplyTarget();
 
-	const wrapper = document.createElement("div");
+	const wrapper = createEl("div");
 	wrapper.className = "chat-message";
 
-	const content = document.createElement("div");
+	const content = createEl("div");
 	content.className = "message-content";
 
 	/* Create the action menu with edit, delete, copy and pin buttons */
@@ -432,7 +432,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 
 	// hover button, spanning the full message height in the reserved gutter; its icon is
 	// kept on screen while scrolling by attachStickyReplyIcon below
-	const replyBtn = document.createElement("button");
+	const replyBtn = createEl("button");
 	replyBtn.className = "msg-reply-btn";
 	replyBtn.type = "button";
 	replyBtn.setAttribute("aria-label", "Reply to message");
@@ -441,7 +441,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 		onReplyToggle(msg.header.id);
 	});
 
-	const replyBtnIcon = document.createElement("span");
+	const replyBtnIcon = createEl("span");
 	replyBtnIcon.className = "msg-reply-btn-icon";
 	setIcon(replyBtnIcon, "reply");
 	replyBtn.append(replyBtnIcon);
@@ -504,22 +504,22 @@ function createTailSvg(): SVGSVGElement {
 
 function createAuthorBadge(authorText: string): { badge: HTMLDivElement; tail: HTMLSpanElement } {
 
-	const badge = document.createElement("div");
+	const badge = createEl("div");
 	badge.className = "msg-author-badge";
 
 	// purely decorative - the name is already a copyable button in the header, and anything
 	// hit-testable here would dead-zone the reply button on owner messages
 	badge.setAttribute("aria-hidden", "true");
 
-	const avatar = document.createElement("span");
+	const avatar = createEl("span");
 	avatar.className = "msg-author-badge-avatar";
 	setIcon(avatar, "user");
 
-	const name = document.createElement("span");
+	const name = createEl("span");
 	name.className = "msg-author-badge-name";
 	name.textContent = authorText;
 
-	const tail = document.createElement("span");
+	const tail = createEl("span");
 	tail.className = "msg-author-badge-tail";
 	tail.append(createTailSvg());
 
@@ -614,14 +614,14 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
    still in the file, so dropping it silently loses the relationship. */
 function createReplyBanner(targetEntry: MessageEntry | undefined, onScroll: () => void): HTMLDivElement {
 
-	const banner = document.createElement("div");
+	const banner = createEl("div");
 	banner.className = "msg-reply-banner";
 
-	const icon = document.createElement("span");
+	const icon = createEl("span");
 	icon.className = "msg-reply-banner-icon";
 	setIcon(icon, "corner-up-left");
 
-	const text = document.createElement("span");
+	const text = createEl("span");
 	text.className = "msg-reply-banner-text";
 
 	banner.append(icon, text);
@@ -670,10 +670,10 @@ function createMessageActionsMenu({
 	const filePath = ctx.sourcePath;
 	const app = plugin.app;
 
-	const menu = document.createElement("div");
+	const menu = createEl("div");
 	menu.className = "msg-action-menu";
 
-	const buttonContainer = document.createElement("div");
+	const buttonContainer = createEl("div");
 	buttonContainer.className = "msg-action-btn-container";
 	buttonContainer.addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -681,22 +681,22 @@ function createMessageActionsMenu({
 
 	// icon-only, so each carries its own label - it is both the accessible name and the
 	// tooltip Obsidian renders from [aria-label]
-	const editBtn = document.createElement("button");
+	const editBtn = createEl("button");
 	editBtn.className = "msg-action-btn msg-edit-btn";
 	editBtn.setAttribute("aria-label", "Edit message");
 	setIcon(editBtn, "pencil");
 
-	const deleteBtn = document.createElement("button");
+	const deleteBtn = createEl("button");
 	deleteBtn.className = "msg-action-btn msg-delete-btn";
 	deleteBtn.setAttribute("aria-label", "Delete message");
 	setIcon(deleteBtn, "trash");
 
-	const copyBtn = document.createElement("button");
+	const copyBtn = createEl("button");
 	copyBtn.className = "msg-action-btn msg-copy-btn";
 	copyBtn.setAttribute("aria-label", "Copy message");
 	setIcon(copyBtn, "copy");
 
-	const menuBtn = document.createElement("button");
+	const menuBtn = createEl("button");
 	menuBtn.className = "msg-action-btn msg-menu-btn";
 	menuBtn.setAttribute("aria-label", "Message actions");
 	setIcon(menuBtn, "menu");
@@ -705,7 +705,7 @@ function createMessageActionsMenu({
 		onToggle(menu);
 	});
 
-	const favBtn = document.createElement("button");
+	const favBtn = createEl("button");
 	favBtn.className = "msg-action-btn msg-fav-btn";
 	favBtn.setAttribute("aria-label", "Pin message");
 	setIcon(favBtn, "pin");
@@ -728,16 +728,16 @@ function createMessageActionsMenu({
 			if (!await copyText(msg.content, "Copied message")) return;
 
 			copyBtn.classList.add("fade");
-			setTimeout(() => {
+			window.setTimeout(() => {
 				setIcon(copyBtn, "checkmark");
 				copyBtn.classList.remove("fade");
 			}, 150);
 
-			clearTimeout(resetTimer);
+			window.clearTimeout(resetTimer);
 
 			resetTimer = window.setTimeout(() => {
 				copyBtn.classList.add("fade");
-				setTimeout(() => {
+				window.setTimeout(() => {
 					setIcon(copyBtn, "copy");
 					copyBtn.classList.remove("fade");
 				}, 180);
@@ -799,26 +799,26 @@ function createMessageActionsMenu({
 			   own body. The file is only touched on save, and the block is re-located by
 			   id then - so an edit made while the note shifted underneath still lands on
 			   the right message. */
-			const textarea = document.createElement("textarea");
+			const textarea = createEl("textarea");
 			textarea.className = "msg-inline-editor";
 			textarea.value = msg.content;
 
 			textarea.setCssStyles({ height: "auto" });
 			textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
 
-			const saveBtn = document.createElement("button");
+			const saveBtn = createEl("button");
 			saveBtn.textContent = "Save";
 			saveBtn.className = "msg-btn msg-editor-save-btn";
 
-			const cancelBtn = document.createElement("button");
+			const cancelBtn = createEl("button");
 			cancelBtn.textContent = "Cancel";
 			cancelBtn.className = "msg-btn msg-editor-cancel-btn";
 
-			const btnRow = document.createElement("div");
+			const btnRow = createEl("div");
 			btnRow.className = "msg-editor-buttons";
 			btnRow.append(saveBtn, cancelBtn);
 
-			const editorWrapper = document.createElement("div");
+			const editorWrapper = createEl("div");
 			editorWrapper.className = "msg-editor-wrapper";
 			editorWrapper.append(textarea, btnRow);
 
@@ -916,13 +916,13 @@ async function copyText(text: string, noticeText: string): Promise<boolean> {
 
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
 
-	const header = document.createElement("div");
+	const header = createEl("div");
 	header.className = "msg-header";
 
-	const meta = document.createElement("div");
+	const meta = createEl("div");
 	meta.className = "msg-header-meta";
 
-	const author = document.createElement("button");
+	const author = createEl("button");
 	author.type = "button";
 	author.className = "msg-author";
 	author.textContent = authorText;
@@ -932,7 +932,7 @@ function createMessageHeader(authorText: string, timestampText: string, menu: HT
 		void copyText(authorText, "Copied author");
 	});
 
-	const timestamp = document.createElement("button");
+	const timestamp = createEl("button");
 	timestamp.type = "button";
 	timestamp.className = "msg-timestamp";
 	timestamp.textContent = timestampText;

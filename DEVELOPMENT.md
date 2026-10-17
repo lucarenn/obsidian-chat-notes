@@ -250,6 +250,11 @@ per scroller, recomputing only rows currently on screen. The author badge uses t
 registry; the reply icon (`attachStickyReplyIcon` in `ui.ts`) keeps its own listeners, since
 it is only visible while its row is hovered, so at most one row is ever tracked.
 
+A row joins the registry when it is **inserted into the page** (`onNodeInserted`), not after a
+fixed delay: Reading View runs the codeblock processor for sections ahead of the viewport and
+inserts them only as they scroll near, so a message further down can sit detached for as long
+as the reader takes to get there. A single-frame wait would register only the rows near the view.
+
 **Off-screen messages have no row.** Both view modes only render near the viewport, so a
 message far away has no node at all. `scrollToMessage` therefore jumps to its *source line*
 first (`setEphemeralState`), which mounts it via the codeblock processor, then polls
