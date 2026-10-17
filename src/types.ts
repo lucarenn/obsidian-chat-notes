@@ -121,6 +121,7 @@ export type CreateHTMLParams = {
 	onToggle: (menu: HTMLElement) => void;
 	onPin: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
 	onReplyToggle: (msgId: string) => void;
+	syncReplyTarget: (row: HTMLElement, msgId: string) => void;
 	// `origin` is the row the banner was clicked in - the target is resolved in that same
 	// pane, never in a hidden subview or another leaf (see scrollToMessage)
 	onScrollToReply: (targetId: string, origin: HTMLElement) => void;

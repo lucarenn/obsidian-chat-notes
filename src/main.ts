@@ -31,12 +31,6 @@ const INPUT_SIZER_SELECTORS = {
 	source: ".markdown-source-view .cm-contentContainer"
 } as const;
 
-// escapes a value for a double-quoted CSS attribute selector - vault paths are user text and
-// may contain either of these
-function cssAttr(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
 export default class ChatNotesPlugin extends Plugin {
 
 	openMenu: HTMLElement | null = null;
@@ -55,11 +49,8 @@ export default class ChatNotesPlugin extends Plugin {
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
 
-	/* Pending reply targets, path -> message id. Mirrors each ChatNote's `replyTo`, which a
-	   WeakMap can't be enumerated for - and the stylesheet below has to be rebuilt from all
-	   of them at once. */
-	private replyTargets = new Map<string, string>();
-	private replyTargetStyleEl: HTMLStyleElement | null = null;
+	// rows currently flagged as a reply target, with the file they belong to (see markReplyTarget)
+	private replyTargetRows = new Map<HTMLElement, TFile>();
 
 	/* Timers the plugin can take back: Obsidian reclaims none of them, and a callback that lands
 	   after onunload runs against a plugin that is gone. */
@@ -271,22 +262,12 @@ export default class ChatNotesPlugin extends Plugin {
 			this.app.vault.on("rename", (file, oldPath) => {
 				this.archiveContexts.delete(oldPath);
 				this.archiveContexts.delete(file.path);
-
-				// the reply-target rule matches on data-chat-src, which the rows now carry
-				// under the new path - so the rule has to be re-keyed, not just dropped
-				const target = this.replyTargets.get(oldPath);
-				this.replyTargets.delete(oldPath);
-				if (target) this.replyTargets.set(file.path, target);
-				this.refreshReplyTargetStyle();
 			})
 		);
 
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				this.archiveContexts.delete(file.path);
-
-				this.replyTargets.delete(file.path);
-				this.refreshReplyTargetStyle();
 			})
 		);
 
@@ -353,6 +334,7 @@ export default class ChatNotesPlugin extends Plugin {
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
 					onPin: (targetId: string) => { void this.handleMessagePin(file, targetId); },
 					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
+					syncReplyTarget: (row: HTMLElement, targetId: string) => this.syncRowReplyTarget(file, row, targetId),
 					// callback for the reply banner; `origin` is the row it was clicked in
 					onScrollToReply: (targetId: string, origin: HTMLElement) => { void this.scrollToMessage(file, targetId, { origin }); }
 				});
@@ -399,7 +381,6 @@ export default class ChatNotesPlugin extends Plugin {
 		this.chatInputTeardown?.();
 		this.resizeObserver?.disconnect();
 		this.windowMigration?.();
-		this.replyTargetStyleEl?.remove();
 		this.chatInputEl?.remove();
 
 		for (const id of this.timeouts) window.clearTimeout(id);
@@ -818,7 +799,7 @@ export default class ChatNotesPlugin extends Plugin {
 		const wasSameTarget = note.replyTo === msgId;
 		note.replyTo = wasSameTarget ? undefined : msgId;
 
-		this.setReplyTarget(file, note.replyTo);
+		this.markReplyTarget(file);
 
 		await this.updateReplyBanner();
 	}
@@ -831,48 +812,35 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!note.replyTo) return;
 
 		note.replyTo = undefined;
-		this.setReplyTarget(file, undefined);
+		this.markReplyTarget(file);
 
 		await this.updateReplyBanner();
 	}
 
-	/* Records which message a file's pending reply points at, and rewrites the stylesheet that
-	   marks it. Nothing touches the rows: a generated rule styles whichever row matches,
-	   whenever it mounts, so it survives Live Preview re-inserting a cached row - and clearing
-	   the rule reaches unmounted rows too, which removing a class by hand can't. */
-	private setReplyTarget(file: TFile, msgId: string | undefined) {
-		if (msgId) this.replyTargets.set(file.path, msgId);
-		else this.replyTargets.delete(file.path);
+	// sets a row's data-reply-target flag (matched in styles.css) from the file's pending reply
+	syncRowReplyTarget(file: TFile, row: HTMLElement, msgId: string) {
+		const isTarget = this.getChatNote(file).replyTo === msgId;
+		row.dataset.replyTarget = String(isTarget);
 
-		this.refreshReplyTargetStyle();
+		if (isTarget) this.replyTargetRows.set(row, file);
+		else this.replyTargetRows.delete(row);
 	}
 
-	private refreshReplyTargetStyle() {
-		if (!this.replyTargetStyleEl) {
-			/* Knowingly against obsidianmd/no-forbidden-elements, which exists to stop plugins
-			   shipping their *appearance* from JS. No appearance ships here: the declarations
-			   live in styles.css and this element carries only a selector naming the current
-			   target, which changes at runtime and cannot be expressed statically. Removed
-			   again in onunload. */
-			// eslint-disable-next-line obsidianmd/no-forbidden-elements
-			this.replyTargetStyleEl = document.createElement("style");
-			document.head.appendChild(this.replyTargetStyleEl);
+	/* Brings every row of the file in line with its pending reply: the rows flagged so far,
+	   which may sit unmounted in Live Preview's cache where no query reaches them, and every row
+	   mounted right now. A cached row that should GAIN the flag re-checks itself when it comes
+	   back into view - see createElementsHTML. */
+	private markReplyTarget(file: TFile) {
+		for (const [row, rowFile] of this.replyTargetRows) {
+			const id = row.dataset.msgId;
+			if (rowFile === file && id !== undefined) this.syncRowReplyTarget(file, row, id);
 		}
 
-		// the rule carries no appearance of its own - it raises the custom properties that
-		// styles.css already consumes, so the look stays in one place
-		const rules: string[] = [];
-		for (const [path, msgId] of this.replyTargets) {
-			rules.push(
-				`.chat-message-row[data-chat-src="${cssAttr(path)}"][data-msg-id="${cssAttr(msgId)}"] {`,
-				`	--msg-reply-outline: 2px solid var(--settings-msg-reply-color, #57467e);`,
-				`	--msg-reply-btn-opacity: 1;`,
-				`	--msg-reply-btn-events: auto;`,
-				`}`
-			);
+		for (const rowsById of collectMessageRows(this.app, file)) {
+			for (const [id, rows] of rowsById) {
+				for (const row of rows) this.syncRowReplyTarget(file, row, id);
+			}
 		}
-
-		this.replyTargetStyleEl.textContent = rules.join("\n");
 	}
 
 	// syncs the input's reply banner with the current file's pending reply target
@@ -1636,7 +1604,7 @@ export default class ChatNotesPlugin extends Plugin {
 		if (!note.replyTo) return;
 
 		note.replyTo = newIds.get(note.replyTo);
-		this.setReplyTarget(file, note.replyTo);
+		this.markReplyTarget(file);
 		void this.updateReplyBanner();
 	}
 

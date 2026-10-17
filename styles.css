@@ -69,9 +69,13 @@
 }
 
 /* Outline around the message the pending reply targets, and the reply button kept visible on
-   it. WHICH row that is comes from a rule the plugin generates at runtime
-   (refreshReplyTargetStyle in main.ts), which does nothing but set the custom properties below
-   on the matching row - generated rather than a class, per the note at the top of this file. */
+   it. The row carries data-reply-target, kept current from JS (markReplyTarget in main.ts). */
+.chat-message-row[data-reply-target="true"] {
+    --msg-reply-outline: 2px solid var(--settings-msg-reply-color, #57467e);
+    --msg-reply-btn-opacity: 1;
+    --msg-reply-btn-events: auto;
+}
+
 .chat-message-row > .chat-message {
     outline: var(--msg-reply-outline, none);
     outline-offset: 2px;
@@ -542,8 +546,8 @@
 
     cursor: pointer;
 
-    /* driven by custom properties so both the hover state and the generated reply-target
-       rule can raise it, without either needing a selector that reaches this element */
+    /* driven by custom properties so both the hover state and the reply-target rule can
+       raise it, without either needing a selector that reaches this element */
     opacity: var(--msg-reply-btn-opacity, 0);
     pointer-events: var(--msg-reply-btn-events, none);
     transition: opacity 120ms ease;
@@ -574,7 +578,7 @@
 }
 
 /* set on the row, not the button, so moving the mouse from bubble to button crosses no dead
-   zone - and so the generated reply-target rule can raise the same two properties */
+   zone - and so the reply-target rule can raise the same two properties */
 .chat-message-row:hover {
     --msg-reply-btn-opacity: 1;
     --msg-reply-btn-events: auto;

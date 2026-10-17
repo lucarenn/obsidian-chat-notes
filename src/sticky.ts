@@ -8,7 +8,10 @@ import { MarkdownPostProcessorContext, MarkdownRenderChild } from "obsidian";
    gutter elements behave identically in both view modes.
 
    The always-visible author badge uses the registry below; the hover-only reply icon
-   (attachStickyReplyIcon in ui.ts) keeps its own listeners and shares only the maths. */
+   (attachStickyReplyIcon in ui.ts) keeps its own listeners and shares only the maths.
+
+   The registry observes every rendered row, so it also tells a row when it comes back into
+   view (`onVisible`), which is how the reply-target flag catches up on cached rows. */
 
 // how far below the top of the visible scroll area the element comes to rest
 const SCROLL_OFFSET = 16;
@@ -46,6 +49,7 @@ type StickyEntry = {
 	target: HTMLElement;
 	// read per update, not captured once - the corner radius is a live setting
 	insets: () => StickyInsets;
+	onVisible?: () => void;
 };
 
 type ScrollerGroup = {
@@ -95,6 +99,7 @@ function createObserver(
 
 				if (record.isIntersecting) {
 					visible.add(entry);
+					entry.onVisible?.();
 				} else {
 					visible.delete(entry);
 				}
@@ -181,12 +186,14 @@ function unregister(scroller: Element, entry: StickyEntry) {
 }
 
 // keeps `target` pinned within `row` for as long as the row is rendered, sharing one
-// scroll listener and one observer with every other tracked row in the same view
+// scroll listener and one observer with every other tracked row in the same view.
+// `onVisible` runs each time the row enters the scroller's visible area
 export function registerSticky(
 	row: HTMLElement,
 	target: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
-	insets: () => StickyInsets = () => DEFAULT_INSETS
+	insets: () => StickyInsets = () => DEFAULT_INSETS,
+	onVisible?: () => void
 ) {
 	let scroller: Element | null = null;
 	let entry: StickyEntry | null = null;
@@ -200,7 +207,7 @@ export function registerSticky(
 		if (!scroller) return;
 
 		const group = getGroup(scroller);
-		entry = { row, target, insets };
+		entry = { row, target, insets, onVisible };
 
 		group.entries.set(row, entry);
 		// observing fires an immediate record, which places the element without waiting

@@ -368,7 +368,7 @@ export function removeChatViewActions(view: MarkdownView) {
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReplyToggle, onScrollToReply} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReplyToggle, syncReplyTarget, onScrollToReply} : CreateHTMLParams){
 
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
@@ -388,6 +388,12 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	   off screen and re-inserts the cached DOM without re-running this processor, so a sweep
 	   would miss every row that isn't mounted at the time. */
 	row.dataset.pinned = String(msg.header.extra.pinned === "true");
+
+	/* The reply-target outline, also matched in styles.css. Unlike the pinned flag it can change
+	   while the row is unmounted, so it is re-checked whenever the row comes back into view
+	   (via registerSticky below) as well as set here. */
+	const resyncReplyTarget = () => syncReplyTarget(row, msg.header.id);
+	resyncReplyTarget();
 
 	const wrapper = document.createElement("div");
 	wrapper.className = "chat-message";
@@ -452,7 +458,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	// after the bubble in DOM order, so the tail paints over the bubble's border ring
 	row.append(wrapper, replyBtn, badge);
 
-	registerSticky(row, badge, ctx, () => tailInsets(row, badge, tail));
+	registerSticky(row, badge, ctx, () => tailInsets(row, badge, tail), resyncReplyTarget);
 
 	return {
 		wrapper,

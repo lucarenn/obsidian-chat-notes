@@ -97,7 +97,7 @@ Two things to know before adding to them:
    `chat-message`, and listeners on `active-leaf-change` (move the chat input),
    `workspace.resize` + `layout-change` (reposition it — `layout-change` is the only one that
    fires on a mode switch), `metadataCache.changed` (refresh the model, then the config), and
-   `vault.rename` / `vault.delete` (drop the model and re-key the reply target).
+   `vault.rename` / `vault.delete` (drop the model).
 2. Obsidian calls the **codeblock processor once per message block**. It:
    - bails to a plain `<pre>` if the file isn't a chat note,
    - gets the file's `ArchiveContext` (see below),
@@ -222,10 +222,8 @@ on — the sticky updates, the scroll-on-send loop, and the polls in `waitForMes
 per window too, so a pending frame is cancelled through the window that scheduled it
 (`cancelResizeFrame` and `cancelScrollPin` hold a closure, not an id).
 
-Two things are known **not** to be a problem, both verified by hand: a runtime `<style>` element
-appended to the main document (`refreshReplyTargetStyle`) *is* mirrored into popouts by Obsidian,
-and building DOM with the main document's `createElement` is fine, since `appendChild` adopts a
-node across documents.
+One thing is known **not** to be a problem, verified by hand: building DOM with the main
+document's `createElement` is fine, since `appendChild` adopts a node across documents.
 
 **Dragging a tab into another window fires no file event.** "Open in new window" opens the file
 in a *new leaf*, so `file-open` → `handleFileSwitch` → `onFileSwitch` rebuilds everything for the
@@ -322,7 +320,7 @@ collide.
 
 **Row vs bubble — the row is the identity.** `.chat-message-row` wraps the bubble
 (`.chat-message`) along with the reply button and the author badge. The row is what carries
-the data attributes (`data-msg-id`, `data-chat-src`, `data-pinned`), what per-message CSS
+the data attributes (`data-msg-id`, `data-chat-src`, `data-pinned`, `data-reply-target`), what per-message CSS
 variables are set on, and what state is expressed against — the CSS then reaches down to the
 bubble where a bubble-shaped effect is wanted. Variables have to live on the row because the
 badge and its tail are *siblings* of the bubble and would never inherit from it; the tail has
@@ -331,8 +329,7 @@ its rounded silhouette) would cut it off.
 
 `chat-message-scroll-flash` is the one remaining state *class* on the row, and it can be:
 it is transient (900 ms), so nothing has to survive an unmount. Everything durable is a data
-attribute or a generated rule, for the reason given under "Live Preview re-inserts cached rows"
-below.
+attribute, for the reason given under "Live Preview re-inserts cached rows" below.
 
 **Borders are `box-shadow`.** `overflow: hidden` clips an element's children but never its
 own border, so a real border would show through as a ring behind the flush reply banner.
@@ -361,20 +358,24 @@ and `styles.css` matches the two. Nothing sweeps, so mount timing stops matterin
 this over `classList.toggle` in a loop whenever the state has to hold for messages that are
 not currently on screen.
 
-**When the state can't be expressed statically, generate the selector.** The reply target is
-the case the pattern above can't cover: "which row is the target" changes at runtime, and CSS
-cannot compare a container's attribute against a row's. So `refreshReplyTargetStyle` maintains
-one plugin-owned `<style>` element holding a rule per pending target, keyed on
-`data-chat-src` + `data-msg-id`. The rule carries **no appearance** — it only raises
-`--msg-reply-outline` / `--msg-reply-btn-opacity` / `--msg-reply-btn-events`, which
-`styles.css` consumes, so the look stays in one place. Because it is a rule and not a class,
-it applies to a row the instant that row is mounted, including a cached re-insert, and stops
-applying the instant the target changes — no row is ever visited.
+**When the state changes at runtime, the flag has to be re-synced, not just set.** The reply
+target is the case the pattern above can't fully cover: "which row is the target" changes
+while rows are unmounted, and CSS cannot compare a container's attribute against a row's. So
+the row carries `data-reply-target` like any other flag, and it is kept current three ways:
+- set at render (`syncRowReplyTarget`);
+- on a target change, re-set on every mounted row *and* on every row flagged so far
+  (`markReplyTarget`). The plugin remembers the flagged rows (`replyTargetRows`, one target's
+  worth per file) because a flagged row cached off screen is out of reach of any DOM query, and
+  clearing the flag has to reach it;
+- re-checked by the row itself whenever it enters the viewport, which covers the opposite case,
+  a cached row that should *gain* the flag. It rides on the IntersectionObserver `sticky.ts`
+  already runs on every row (`registerSticky`'s `onVisible`), so it costs no extra observer.
 
-This knowingly breaks `obsidianmd/no-forbidden-elements` (disabled inline, with the reasoning
-at the call site). That rule targets plugins shipping styling from JS; the alternative here
-would be re-asserting a class from a MutationObserver, at the cost of a document-wide query
-on every frame the DOM churns.
+The look stays in `styles.css`: the attribute rule only raises `--msg-reply-outline` /
+`--msg-reply-btn-opacity` / `--msg-reply-btn-events`.
+
+Don't reach for a runtime `<style>` element instead: `obsidianmd/no-forbidden-elements` forbids
+it, and the community directory's review rejects disabling that rule.
 
 **Replies resolve forward-only, at render.** A reply stores its target's id; the target stores
 nothing. Nothing indexes replies and deleting a message carries no bookkeeping — each banner
