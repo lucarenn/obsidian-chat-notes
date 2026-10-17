@@ -719,7 +719,7 @@ function createMessageActionsMenu({
 
 	copyBtn.addEventListener("click", () => {
 		void (async () => {
-			await navigator.clipboard.writeText(msg.content);
+			if (!await copyText(msg.content, "Copied message")) return;
 
 			copyBtn.classList.add("fade");
 			setTimeout(() => {
@@ -736,9 +736,6 @@ function createMessageActionsMenu({
 					copyBtn.classList.remove("fade");
 				}, 180);
 			}, 1100);
-
-			new Notice("Copied message");
-
 		})();
 	});
 
@@ -897,9 +894,18 @@ function createMessageActionsMenu({
 	};
 }
 
-async function copyHeaderText(text: string, noticeText: string) {
-	await navigator.clipboard.writeText(text);
+// the clipboard can refuse, e.g. while Obsidian isn't focused - reported, never left silent
+async function copyText(text: string, noticeText: string): Promise<boolean> {
+	try {
+		await navigator.clipboard.writeText(text);
+	} catch (err) {
+		console.error("Failed to copy to the clipboard", err);
+		new Notice("Could not copy");
+		return false;
+	}
+
 	new Notice(noticeText);
+	return true;
 }
 
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
@@ -917,7 +923,7 @@ function createMessageHeader(authorText: string, timestampText: string, menu: HT
 	author.setAttribute("aria-label", "Copy author");
 	author.addEventListener("click", (e) => {
 		e.stopPropagation();
-		void copyHeaderText(authorText, "Copied author");
+		void copyText(authorText, "Copied author");
 	});
 
 	const timestamp = document.createElement("button");
@@ -927,7 +933,7 @@ function createMessageHeader(authorText: string, timestampText: string, menu: HT
 	timestamp.setAttribute("aria-label", "Copy date");
 	timestamp.addEventListener("click", (e) => {
 		e.stopPropagation();
-		void copyHeaderText(timestampText, "Copied date");
+		void copyText(timestampText, "Copied date");
 	});
 
 	meta.append(author, timestamp);
