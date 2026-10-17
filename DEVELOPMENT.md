@@ -208,12 +208,19 @@ there is no node to ask, the `activeWindow` / `activeDocument` globals), and eve
 observes, listens or measures goes through them: `setupResizeObserver` builds its
 `ResizeObserver` from `el.win` (an observer
 only delivers callbacks from the rendering lifecycle of the window it was constructed in, so a
-main-window one never fires for a resized popout), `sticky.ts` and `attachStickyReplyIcon` bind
+main-window one never fires for a resized popout), `sticky.ts` builds its `IntersectionObserver`
+from the scroller's window for the same reason, `sticky.ts` and `attachStickyReplyIcon` bind
 their resize listeners to the scroller's window, and `waitUntilVisible` measures against
 `element.win.innerHeight`. Both keep the window they registered with rather than reading it back
 at teardown — a *detached* node reports the global window, which would remove the listener from
-the wrong one. Frame ids are per window too, so a pending `requestAnimationFrame` is cancelled
-through the window that scheduled it (`cancelResizeFrame` holds a closure, not an id).
+the wrong one.
+
+`requestAnimationFrame` is per window as well, and the main window's frames are throttled or
+stop while a popout has focus. So every frame loop runs on the window of the element it works
+on — the sticky updates, the scroll-on-send loop, and the polls in `waitForMessageRow` /
+`waitUntilVisible` (with the main window's frames, the reply flash never played). Frame ids are
+per window too, so a pending frame is cancelled through the window that scheduled it
+(`cancelResizeFrame` and `cancelScrollPin` hold a closure, not an id).
 
 Two things are known **not** to be a problem, both verified by hand: a runtime `<style>` element
 appended to the main document (`refreshReplyTargetStyle`) *is* mirrored into popouts by Obsidian,

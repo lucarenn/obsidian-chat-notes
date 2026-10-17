@@ -64,9 +64,9 @@ export default class ChatNotesPlugin extends Plugin {
 	/* Timers the plugin can take back: Obsidian reclaims none of them, and a callback that lands
 	   after onunload runs against a plugin that is gone. */
 	private timeouts = new Set<number>();
-	private scrollPinFrame: number | null = null;
-	// a closure, not a frame id: this one is scheduled in the view's own window, and frame ids
+	// closures, not frame ids: these are scheduled in the view's own window, and frame ids
 	// are per window
+	private cancelScrollPin: (() => void) | null = null;
 	private cancelResizeFrame: (() => void) | null = null;
 
 	activeEditor: {
@@ -404,7 +404,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 		for (const id of this.timeouts) window.clearTimeout(id);
 		this.timeouts.clear();
-		if (this.scrollPinFrame !== null) cancelAnimationFrame(this.scrollPinFrame);
+		this.cancelScrollPin?.();
 		this.cancelResizeFrame?.();
 
 		this.forEachMarkdownView(view => {
@@ -973,14 +973,19 @@ export default class ChatNotesPlugin extends Plugin {
 			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 		if (!view) return;
 
+		// a send during the previous loop takes over from it rather than running alongside
+		this.cancelScrollPin?.();
+
 		const start = performance.now();
+		const win = view.containerEl.win;
 
 		const pin = () => {
-			this.scrollPinFrame = null;
+			this.cancelScrollPin = null;
 			scrollDocument(view, "bottom");
 
 			if (performance.now() - start < SCROLL_ON_SEND_PIN_MS) {
-				this.scrollPinFrame = requestAnimationFrame(pin);
+				const frame = win.requestAnimationFrame(pin);
+				this.cancelScrollPin = () => { win.cancelAnimationFrame(frame); };
 			}
 		};
 
@@ -1100,6 +1105,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 		if (options?.flash ?? true) {
 			const target = row;
+			// restarted, not just added: if the previous flash's class is still on the row,
+			// adding it again would not replay the animation
+			target.classList.remove("chat-message-scroll-flash");
+			void target.offsetWidth;
 			target.classList.add("chat-message-scroll-flash");
 			this.later(() => target.classList.remove("chat-message-scroll-flash"), 900);
 		}
@@ -1117,6 +1126,8 @@ export default class ChatNotesPlugin extends Plugin {
 		timeoutMs = 1500
 	): Promise<HTMLElement | undefined> {
 		const start = performance.now();
+		// polled on the pane's own window: the main one's frames stall while a popout has focus
+		const win = scroller?.win ?? activeWindow;
 
 		for (;;) {
 			const rendered = findMessageRows(this.app, file, msgId).filter(isRowRendered);
@@ -1126,12 +1137,13 @@ export default class ChatNotesPlugin extends Plugin {
 			if (row) return row;
 
 			if (performance.now() - start > timeoutMs) return undefined;
-			await new Promise(resolve => requestAnimationFrame(resolve));
+			await new Promise(resolve => win.requestAnimationFrame(resolve));
 		}
 	}
 
 	// with no container, the element is measured against its own window's viewport - a row in a
-	// popout has to be checked against that window, not the main one
+	// popout has to be checked against that window, not the main one - and polled on it, for the
+	// same reason as waitForMessageRow
 	async waitUntilVisible(
 		element: HTMLElement,
 		container?: HTMLElement,
@@ -1162,7 +1174,7 @@ export default class ChatNotesPlugin extends Plugin {
 				if (visible || performance.now() - start > timeoutMs) {
 					resolve();
 				} else {
-					requestAnimationFrame(check);
+					element.win.requestAnimationFrame(check);
 				}
 			};
 
@@ -1556,7 +1568,7 @@ export default class ChatNotesPlugin extends Plugin {
 			cm.scrollTo(scroll.left, scroll.top);
 			// again after layout settles - the re-created widget can resize as it renders,
 			// and the scroll correction has to land after that, not before
-			requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
+			(view?.containerEl.win ?? window).requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
 		} else {
 			await this.app.vault.process(file, () => updated);
 		}
@@ -1606,7 +1618,7 @@ export default class ChatNotesPlugin extends Plugin {
 			);
 
 			cm.scrollTo(scroll.left, scroll.top);
-			requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
+			(view?.containerEl.win ?? window).requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
 		} else {
 			await this.app.vault.process(file, () => updated);
 		}

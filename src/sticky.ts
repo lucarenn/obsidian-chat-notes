@@ -78,35 +78,69 @@ function updateEntry(entry: StickyEntry, scrollerRect: DOMRect) {
 	entry.target.style.transform = `translateY(${offset}px)`;
 }
 
+// built from the scroller's window: one from the main window misses rows in a popout
+function createObserver(
+	scroller: Element,
+	entries: Map<Element, StickyEntry>,
+	visible: Set<StickyEntry>,
+	onChange: () => void
+): IntersectionObserver {
+	const win = scroller.win as Window & typeof globalThis;
+
+	return new win.IntersectionObserver(
+		(records) => {
+			for (const record of records) {
+				const entry = entries.get(record.target);
+				if (!entry) continue;
+
+				if (record.isIntersecting) {
+					visible.add(entry);
+				} else {
+					visible.delete(entry);
+				}
+			}
+
+			onChange();
+		},
+		{ root: scroller }
+	);
+}
+
+/* A tab dragged into another window MOVES its scroller there, so a group built before the drag
+   is still bound to the window it left - and stalls as soon as that window is minimised. */
+function rebindWindow(scroller: Element, group: ScrollerGroup) {
+	if (group.rafId !== null) {
+		group.win.cancelAnimationFrame(group.rafId);
+		group.rafId = null;
+	}
+	group.win.removeEventListener("resize", group.onScroll);
+	group.observer.disconnect();
+	group.visible.clear();
+
+	group.win = scroller.win;
+	group.observer = createObserver(scroller, group.entries, group.visible, group.onScroll);
+	for (const row of group.entries.keys()) group.observer.observe(row);
+	group.win.addEventListener("resize", group.onScroll, { passive: true });
+}
+
 function getGroup(scroller: Element): ScrollerGroup {
 	const existing = groups.get(scroller);
 	if (existing) return existing;
 
+	const entries = new Map<Element, StickyEntry>();
+	const visible = new Set<StickyEntry>();
+
 	const group: ScrollerGroup = {
 		win: scroller.win,
-		entries: new Map(),
-		visible: new Set(),
-		observer: new IntersectionObserver(
-			(records) => {
-				for (const record of records) {
-					const entry = group.entries.get(record.target);
-					if (!entry) continue;
-
-					if (record.isIntersecting) {
-						group.visible.add(entry);
-					} else {
-						group.visible.delete(entry);
-					}
-				}
-
-				group.onScroll();
-			},
-			{ root: scroller }
-		),
+		entries,
+		visible,
+		observer: createObserver(scroller, entries, visible, () => group.onScroll()),
 		onScroll: () => {
+			// connected only: a detached node reports the global window, not its own
+			if (scroller.isConnected && scroller.win !== group.win) rebindWindow(scroller, group);
 			if (group.rafId !== null) return;
 
-			group.rafId = requestAnimationFrame(() => {
+			group.rafId = group.win.requestAnimationFrame(() => {
 				group.rafId = null;
 
 				// one rect for the whole pass - it's the same scroller for every entry
@@ -139,7 +173,7 @@ function unregister(scroller: Element, entry: StickyEntry) {
 	if (group.entries.size > 0) return;
 
 	// last element in this view went away - tear the whole group down
-	if (group.rafId !== null) cancelAnimationFrame(group.rafId);
+	if (group.rafId !== null) group.win.cancelAnimationFrame(group.rafId);
 	group.observer.disconnect();
 	scroller.removeEventListener("scroll", group.onScroll);
 	group.win.removeEventListener("resize", group.onScroll);
@@ -158,8 +192,10 @@ export function registerSticky(
 	let entry: StickyEntry | null = null;
 
 	// deferred a frame on purpose: the row is still detached at this point, so closest()
-	// would find no scroller at all
-	const frame = requestAnimationFrame(() => {
+	// would find no scroller at all. The row can't name its window yet either, so this uses
+	// the active one - the window the note is being rendered in
+	const win = activeWindow;
+	const frame = win.requestAnimationFrame(() => {
 		scroller = row.closest(".cm-scroller, .markdown-preview-view");
 		if (!scroller) return;
 
@@ -176,7 +212,7 @@ export function registerSticky(
 	// leaf all unload the child, which is the only signal that the row is gone
 	const child = new MarkdownRenderChild(target);
 	child.onunload = () => {
-		cancelAnimationFrame(frame);
+		win.cancelAnimationFrame(frame);
 		if (scroller && entry) unregister(scroller, entry);
 	};
 	ctx.addChild(child);

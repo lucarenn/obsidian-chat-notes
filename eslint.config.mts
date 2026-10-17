@@ -13,6 +13,7 @@ export default tseslint.config(
 				createEl: "readonly",
 				createSpan: "readonly",
 				createFragment: "readonly",
+				activeWindow: "readonly",
 			},
 			parserOptions: {
 				projectService: {

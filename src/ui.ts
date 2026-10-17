@@ -564,8 +564,8 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 	};
 
 	const scheduleUpdate = () => {
-		if (rafId !== null) return;
-		rafId = requestAnimationFrame(update);
+		if (rafId !== null || !scrollerWin) return;
+		rafId = scrollerWin.requestAnimationFrame(update);
 	};
 
 	const start = () => {
@@ -583,7 +583,7 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
 
 	const stop = () => {
 		if (rafId !== null) {
-			cancelAnimationFrame(rafId);
+			scrollerWin?.cancelAnimationFrame(rafId);
 			rafId = null;
 		}
 		scroller?.removeEventListener("scroll", scheduleUpdate);
