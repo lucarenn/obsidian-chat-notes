@@ -487,7 +487,9 @@ normally set once per note; do not reach for this for anything that changes more
 
 1. `settings.ts`: add the key to `ChatConfig` (only if it should be YAML-overridable), to
    `ChatNotesPluginSettings`, and to `DEFAULT_SETTINGS`.
-2. Add its control to `ChatNotesSettingTab.display()`.
+2. Add its entry to `ChatNotesSettingTab.getSettingDefinitions()`. Obsidian 1.13+ renders that
+   list itself; `display()` renders it on older versions, so a new control type needs a case
+   there and in `SettingSpec`.
 3. If overridable: map a YAML alias in `getFileOverrides`, through `parseBooleanOverride` /
    `parsePixelOverride` so a bad value falls back instead of breaking.
 4. Consume it — visual settings in `applyStyles` (a CSS variable or a container class),

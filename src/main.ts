@@ -116,6 +116,16 @@ export default class ChatNotesPlugin extends Plugin {
 			},
 		});
 
+		this.ribbonIconEl = this.addRibbonIcon(
+			"message-square-plus",
+			"Create new chat note",
+			() => {
+				void this.createChatNote().catch(err => {
+					console.error("Failed to create chat note", err);
+					new Notice("Could not create the chat note");
+				});
+			}
+		);
 		this.updateRibbonIcon();
 
 		this.addCommand({
@@ -688,26 +698,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 	/* Chat Note Creation */
 
-	// addRibbonIcon has no removal counterpart, so the element is detached by hand - and
-	// only ever created once, since a second call would leave a duplicate icon behind
+	// hidden rather than removed: the ribbon only saves the order of registered icons, so a
+	// removed one lost its place and came back at a stale position or at the top
 	updateRibbonIcon() {
-		const wanted = this.settings.showRibbonIcon;
-
-		if (wanted && !this.ribbonIconEl) {
-			this.ribbonIconEl = this.addRibbonIcon(
-				"message-square-plus",
-				"Create new chat note",
-				() => {
-					void this.createChatNote().catch(err => {
-						console.error("Failed to create chat note", err);
-						new Notice("Could not create the chat note");
-					});
-				}
-			);
-		} else if (!wanted && this.ribbonIconEl) {
-			this.ribbonIconEl.remove();
-			this.ribbonIconEl = null;
-		}
+		this.ribbonIconEl?.toggleClass("chat-notes-ribbon-hidden", !this.settings.showRibbonIcon);
 	}
 
 	// `type` marks the note as a chat; `author` has no global setting to fall back on. The

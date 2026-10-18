@@ -70,6 +70,20 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 };
 
 
+type SettingKey = keyof ChatNotesPluginSettings;
+
+// the subset of Obsidian's SettingDefinitionControl used here; declared locally because
+// those types are 1.13+ and the display() fallback reads these objects on older versions
+interface SettingSpec {
+	name: string;
+	desc: string;
+	control:
+		| { type: "color"; key: SettingKey }
+		| { type: "toggle"; key: SettingKey }
+		| { type: "slider"; key: SettingKey; min: number; max: number; step: number }
+		| { type: "dropdown"; key: SettingKey; options: Record<string, string> };
+}
+
 export class ChatNotesSettingTab extends PluginSettingTab {
 	plugin: ChatNotesPlugin;
 
@@ -78,196 +92,133 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	// rendered by Obsidian 1.13+ (and indexed for settings search); display() renders the
+	// same list on older versions
+	getSettingDefinitions(): SettingSpec[] {
+		return [
+			{
+				name: "Message background color",
+				desc: "Determines the background color of message bubbles",
+				control: { type: "color", key: "messageBgColor" },
+			},
+			{
+				name: "Message pin color",
+				desc: "Determines the background color of a pinned message",
+				control: { type: "color", key: "messagePinColor" },
+			},
+			{
+				name: "Message flash color",
+				desc: "Determines the color of the short flash played when scrolling to a specific message",
+				control: { type: "color", key: "messageFlashColor" },
+			},
+			{
+				name: "Reply banner color",
+				desc: "Determines the background color of the 'reply to' banner shown on messages that reply to another one",
+				control: { type: "color", key: "messageReplyColor" },
+			},
+			{
+				name: "Message border color",
+				desc: "Determines the outline color of message bubbles and the chat input field",
+				control: { type: "color", key: "messageBorderColor" },
+			},
+			{
+				name: "Enable button shadow",
+				desc: "Toggle shadow on message action buttons; override per file with 'msgButtonShadow: true' or 'msgButtonShadow: false'.",
+				control: { type: "toggle", key: "enableButtonShadow" },
+			},
+			{
+				name: "Show message author",
+				desc: "Show the author name in the header of every message; override per file with 'msgShowAuthor: true' or 'msgShowAuthor: false'.",
+				control: { type: "toggle", key: "showMessageAuthor" },
+			},
+			{
+				name: "Show message time",
+				desc: "Show the timestamp in the header of every message; override per file with 'msgShowTime: true' or 'msgShowTime: false'.",
+				control: { type: "toggle", key: "showMessageTimestamp" },
+			},
+			{
+				name: "Show author badges",
+				desc: "Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else; widens the gutter slightly while on; override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.",
+				control: { type: "toggle", key: "showAuthorBadges" },
+			},
+			{
+				name: "Message corner radius",
+				desc: "Determines how round corners of the message bubbles are; override per file with 'msgCornerRadius: 20'.",
+				control: { type: "slider", key: "messageCornerRadius", min: CORNER_RADIUS_MIN, max: CORNER_RADIUS_MAX, step: 1 },
+			},
+			{
+				name: "Default message author",
+				desc: "Which author a new message is sent as when its author field is left empty; override per file with 'msgDefaultAuthor: owner' or 'msgDefaultAuthor: previous'; the chat owner itself is the file's 'author' YAML key.",
+				control: {
+					type: "dropdown",
+					key: "defaultAuthorMode",
+					options: { owner: "Chat owner", previous: "Previous message's author" },
+				},
+			},
+			{
+				name: "Scroll to bottom on send",
+				desc: "Jump to the end of the chat every time a message is sent; override per file with 'msgScrollOnSend: true' or 'msgScrollOnSend: false'.",
+				control: { type: "toggle", key: "scrollOnSend" },
+			},
+			{
+				name: "Show ribbon icon",
+				desc: "Show a button in the left ribbon for creating a new chat note; the command itself stays available from the command palette either way, and can be given a hotkey there.",
+				control: { type: "toggle", key: "showRibbonIcon" },
+			},
+			{
+				name: "Input field width offset",
+				desc: "Widens or narrows the message input field relative to the message bubbles it sits under. At 0 its edges line up with the messages.",
+				control: { type: "slider", key: "inputWidthOffset", min: -150, max: 150, step: 5 },
+			},
+			{
+				name: "Max input field height",
+				desc: "Determines how tall the message input field can grow before it starts scrolling",
+				control: { type: "slider", key: "inputMaxHeight", min: 60, max: 600, step: 20 },
+			},
+		];
+	}
+
+	// the base versions only exist from 1.13 on, and saveSettings also updates open chat notes
+	getControlValue(key: string): unknown {
+		return this.plugin.settings[key as SettingKey];
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		Object.assign(this.plugin.settings, { [key]: value });
+		await this.plugin.saveSettings();
+	}
+
+	// fallback for Obsidian before 1.13
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl)
-			.setName("Message background color")
-			.setDesc("Determines the background color of message bubbles")
-			.addColorPicker(color => {
-				color
-					.setValue(this.plugin.settings.messageBgColor)
-					.onChange(async (value) => {
-						this.plugin.settings.messageBgColor = value;
-						await this.plugin.saveSettings();
-					});
-			});
+		for (const { name, desc, control } of this.getSettingDefinitions()) {
+			const setting = new Setting(containerEl).setName(name).setDesc(desc);
+			const value = this.getControlValue(control.key);
+			const save = (newValue: unknown) => this.setControlValue(control.key, newValue);
 
-		new Setting(containerEl)
-		.setName("Message pin color")
-		.setDesc("Determines the background color of a pinned message")
-		.addColorPicker(color => {
-			color
-				.setValue(this.plugin.settings.messagePinColor)
-				.onChange(async (value) => {
-					this.plugin.settings.messagePinColor = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Message flash color")
-		.setDesc("Determines the color of the short flash played when scrolling to a specific message")
-		.addColorPicker(color => {
-			color
-				.setValue(this.plugin.settings.messageFlashColor)
-				.onChange(async (value) => {
-					this.plugin.settings.messageFlashColor = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Reply banner color")
-		.setDesc("Determines the background color of the 'reply to' banner shown on messages that reply to another one")
-		.addColorPicker(color => {
-			color
-				.setValue(this.plugin.settings.messageReplyColor)
-				.onChange(async (value) => {
-					this.plugin.settings.messageReplyColor = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Message border color")
-		.setDesc("Determines the outline color of message bubbles and the chat input field")
-		.addColorPicker(color => {
-			color
-				.setValue(this.plugin.settings.messageBorderColor)
-				.onChange(async (value) => {
-					this.plugin.settings.messageBorderColor = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Enable button shadow")
-		.setDesc("Toggle shadow on message action buttons; override per file with 'msgButtonShadow: true' or 'msgButtonShadow: false'.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.enableButtonShadow)
-				.onChange(async (value) => {
-					this.plugin.settings.enableButtonShadow = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Show message author")
-		.setDesc("Show the author name in the header of every message; override per file with 'msgShowAuthor: true' or 'msgShowAuthor: false'.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.showMessageAuthor)
-				.onChange(async (value) => {
-					this.plugin.settings.showMessageAuthor = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Show message time")
-		.setDesc("Show the timestamp in the header of every message; override per file with 'msgShowTime: true' or 'msgShowTime: false'.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.showMessageTimestamp)
-				.onChange(async (value) => {
-					this.plugin.settings.showMessageTimestamp = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Show author badges")
-		.setDesc("Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else; widens the gutter slightly while on; override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.showAuthorBadges)
-				.onChange(async (value) => {
-					this.plugin.settings.showAuthorBadges = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Message corner radius")
-		.setDesc("Determines how round corners of the message bubbles are; override per file with 'msgCornerRadius: 20'.")
-		.addSlider(slider => {
-			slider
-				.setLimits(CORNER_RADIUS_MIN, CORNER_RADIUS_MAX, 1) 	// step 1px
-				.setValue(this.plugin.settings.messageCornerRadius)
-				.onChange(async (value) => {
-					this.plugin.settings.messageCornerRadius = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Default message author")
-		.setDesc("Which author a new message is sent as when its author field is left empty; override per file with 'msgDefaultAuthor: owner' or 'msgDefaultAuthor: previous'; the chat owner itself is the file's 'author' YAML key.")
-		.addDropdown(dropdown => {
-			dropdown
-				.addOption("owner", "Chat owner")
-				.addOption("previous", "Previous message's author")
-				.setValue(this.plugin.settings.defaultAuthorMode)
-				.onChange(async (value) => {
-					this.plugin.settings.defaultAuthorMode = value as DefaultAuthorMode;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Scroll to bottom on send")
-		.setDesc("Jump to the end of the chat every time a message is sent; override per file with 'msgScrollOnSend: true' or 'msgScrollOnSend: false'.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.scrollOnSend)
-				.onChange(async (value) => {
-					this.plugin.settings.scrollOnSend = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Show ribbon icon")
-		.setDesc("Show a button in the left ribbon for creating a new chat note; the command itself stays available from the command palette either way, and can be given a hotkey there.")
-		.addToggle(toggle => {
-			toggle
-				.setValue(this.plugin.settings.showRibbonIcon)
-				.onChange(async (value) => {
-					this.plugin.settings.showRibbonIcon = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Input field width offset")
-		.setDesc("Widens or narrows the message input field relative to the message bubbles it sits under. At 0 its edges line up with the messages.")
-		.addSlider(slider => {
-			slider
-				.setLimits(-150, 150, 5) 	// min -150px, max +150px, step 5px
-				.setValue(this.plugin.settings.inputWidthOffset)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.inputWidthOffset = value;
-					await this.plugin.saveSettings();
-				});
-		});
-
-		new Setting(containerEl)
-		.setName("Max input field height")
-		.setDesc("Determines how tall the message input field can grow before it starts scrolling")
-		.addSlider(slider => {
-			slider
-				.setLimits(60, 600, 20) 	// min 60px, max 600px, step 20px
-				.setValue(this.plugin.settings.inputMaxHeight)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.inputMaxHeight = value;
-					await this.plugin.saveSettings();
-				});
-		});
+			switch (control.type) {
+				case "color":
+					setting.addColorPicker(color => color.setValue(value as string).onChange(save));
+					break;
+				case "toggle":
+					setting.addToggle(toggle => toggle.setValue(value as boolean).onChange(save));
+					break;
+				case "slider":
+					setting.addSlider(slider => slider
+						.setLimits(control.min, control.max, control.step)
+						.setValue(value as number)
+						.onChange(save));
+					break;
+				case "dropdown":
+					setting.addDropdown(dropdown => dropdown
+						.addOptions(control.options)
+						.setValue(value as string)
+						.onChange(save));
+					break;
+			}
+		}
 	}
 }
 

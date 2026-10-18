@@ -44,7 +44,7 @@ author: Some Name
 
 ## Writing messages
 
-Messages are written and render as markdown (code blocks included).
+Messages are written and render as Markdown (code blocks included).
 
 > **Backticks:** a message is stored inside a four-backtick block, so a longer run of backticks
 > inside a message would close it early and break the note. Runs of four or more backticks are
@@ -169,6 +169,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, markdown message editing/writing and better plugin compatibility in the future.
+I might implement additions like virtualized rendering, Markdown message editing/writing and better plugin compatibility in the future.
 
 > The plugin has not been tested on mobile.

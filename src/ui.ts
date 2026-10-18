@@ -373,7 +373,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
 	// overflow. Hover is bound to the row, making bubble+gutter+button one hover zone.
-	const row = createEl("div");
+	const row = createDiv();
 	row.className = "chat-message-row";
 
 	/* How every later operation finds this message again. Nothing holds a reference to the
@@ -395,10 +395,10 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	const resyncReplyTarget = () => syncReplyTarget(row, msg.header.id);
 	resyncReplyTarget();
 
-	const wrapper = createEl("div");
+	const wrapper = createDiv();
 	wrapper.className = "chat-message";
 
-	const content = createEl("div");
+	const content = createDiv();
 	content.className = "message-content";
 
 	/* Create the action menu with edit, delete, copy and pin buttons */
@@ -441,7 +441,7 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 		onReplyToggle(msg.header.id);
 	});
 
-	const replyBtnIcon = createEl("span");
+	const replyBtnIcon = createSpan();
 	replyBtnIcon.className = "msg-reply-btn-icon";
 	setIcon(replyBtnIcon, "reply");
 	replyBtn.append(replyBtnIcon);
@@ -504,22 +504,22 @@ function createTailSvg(): SVGSVGElement {
 
 function createAuthorBadge(authorText: string): { badge: HTMLDivElement; tail: HTMLSpanElement } {
 
-	const badge = createEl("div");
+	const badge = createDiv();
 	badge.className = "msg-author-badge";
 
 	// purely decorative - the name is already a copyable button in the header, and anything
 	// hit-testable here would dead-zone the reply button on owner messages
 	badge.setAttribute("aria-hidden", "true");
 
-	const avatar = createEl("span");
+	const avatar = createSpan();
 	avatar.className = "msg-author-badge-avatar";
 	setIcon(avatar, "user");
 
-	const name = createEl("span");
+	const name = createSpan();
 	name.className = "msg-author-badge-name";
 	name.textContent = authorText;
 
-	const tail = createEl("span");
+	const tail = createSpan();
 	tail.className = "msg-author-badge-tail";
 	tail.append(createTailSvg());
 
@@ -614,14 +614,14 @@ function attachStickyReplyIcon(row: HTMLElement, btn: HTMLElement, icon: HTMLEle
    still in the file, so dropping it silently loses the relationship. */
 function createReplyBanner(targetEntry: MessageEntry | undefined, onScroll: () => void): HTMLDivElement {
 
-	const banner = createEl("div");
+	const banner = createDiv();
 	banner.className = "msg-reply-banner";
 
-	const icon = createEl("span");
+	const icon = createSpan();
 	icon.className = "msg-reply-banner-icon";
 	setIcon(icon, "corner-up-left");
 
-	const text = createEl("span");
+	const text = createSpan();
 	text.className = "msg-reply-banner-text";
 
 	banner.append(icon, text);
@@ -670,10 +670,10 @@ function createMessageActionsMenu({
 	const filePath = ctx.sourcePath;
 	const app = plugin.app;
 
-	const menu = createEl("div");
+	const menu = createDiv();
 	menu.className = "msg-action-menu";
 
-	const buttonContainer = createEl("div");
+	const buttonContainer = createDiv();
 	buttonContainer.className = "msg-action-btn-container";
 	buttonContainer.addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -814,11 +814,11 @@ function createMessageActionsMenu({
 			cancelBtn.textContent = "Cancel";
 			cancelBtn.className = "msg-btn msg-editor-cancel-btn";
 
-			const btnRow = createEl("div");
+			const btnRow = createDiv();
 			btnRow.className = "msg-editor-buttons";
 			btnRow.append(saveBtn, cancelBtn);
 
-			const editorWrapper = createEl("div");
+			const editorWrapper = createDiv();
 			editorWrapper.className = "msg-editor-wrapper";
 			editorWrapper.append(textarea, btnRow);
 
@@ -916,10 +916,10 @@ async function copyText(text: string, noticeText: string): Promise<boolean> {
 
 function createMessageHeader(authorText: string, timestampText: string, menu: HTMLDivElement): HTMLDivElement {
 
-	const header = createEl("div");
+	const header = createDiv();
 	header.className = "msg-header";
 
-	const meta = createEl("div");
+	const meta = createDiv();
 	meta.className = "msg-header-meta";
 
 	const author = createEl("button");

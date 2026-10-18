@@ -27,6 +27,12 @@
     --chat-input-inset: 2px;
 }
 
+/* the "Show ribbon icon" setting; a class rather than inline display, which the ribbon
+   resets whenever it re-renders */
+.side-dock-ribbon-action.chat-notes-ribbon-hidden {
+    display: none;
+}
+
 /* --------------------------------*/
 /* MESSAGE BUBBLE AND CONTENT */
 /* --------------------------------*/
