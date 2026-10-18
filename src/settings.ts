@@ -50,6 +50,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 export const CORNER_RADIUS_MIN = 0;
 export const CORNER_RADIUS_MAX = 50;
 
+// the colours and the corner radius are mirrored as the var() fallbacks in styles.css
 export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageBgColor: "#6d54b1",
 	enableButtonShadow: true,

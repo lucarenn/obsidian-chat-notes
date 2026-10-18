@@ -2,7 +2,7 @@ import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, Wor
 import { Header, Message, ChatNote, ArchiveContext } from "./types";
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings";
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui";
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util";
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getEmbedHosts, embedHostOf, getRenderedChatPaths, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util";
 import { ConfirmModal } from "./modals"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
@@ -63,6 +63,9 @@ export default class ChatNotesPlugin extends Plugin {
 
 	// rows currently flagged as a reply target, with the file they belong to (see markReplyTarget)
 	private replyTargetRows = new Map<HTMLElement, TFile>();
+
+	// the config each embed host was last styled with (see styleEmbedHost)
+	private styledEmbeds = new WeakMap<HTMLElement, ChatConfig>();
 
 	// state of a block just rewritten in the editor, by blockKey (see reserveBlock)
 	private reservedBlocks = new Map<string, { height: number; hovered: boolean }>();
@@ -376,6 +379,10 @@ export default class ChatNotesPlugin extends Plugin {
 				// and the container carries the filter class, so CSS covers it on mount
 				if (reserved?.hovered) carryHover(row);
 				el.appendChild(row);
+
+				// not once: Live Preview re-inserts cached rows, which may be the first sign of
+				// an embed opened since the config last changed
+				row.onNodeInserted(() => this.styleEmbedHost(file, row));
 
 
 				// only when the config actually changed - every later message inherits the
@@ -1227,6 +1234,11 @@ export default class ChatNotesPlugin extends Plugin {
 		this.forEachMarkdownView(view => {
 			if (view.file && this.getIsChatNote(view.file)) openFiles.add(view.file);
 		});
+		// chats shown only in an embed (a canvas card, say) have no view of their own
+		for (const path of getRenderedChatPaths(this.app)) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (file instanceof TFile) openFiles.add(file);
+		}
 
 		for (const file of openFiles) {
 			this.updateFileConfig(file);
@@ -1370,6 +1382,20 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
+	/* Styles the embed a row was just inserted into, unless it already has the file's current
+	   config. applyConfigToFile only reaches embeds with rows on screen, so one opened later
+	   (a canvas, say) is styled from here. */
+	private styleEmbedHost(file: TFile, row: HTMLElement) {
+		const host = embedHostOf(row);
+		if (!host) return;
+
+		const config = this.getConfigCache(file);
+		if (this.styledEmbeds.get(host) === config) return;
+
+		this.applyStyles(host, config);
+		this.styledEmbeds.set(host, config);
+	}
+
 	// the config that isn't CSS - plain values the message-building code reads
 	applyConfigToContext(context: ArchiveContext, config: ChatConfig) {
 		context.chatAuthor = config.author;
@@ -1389,6 +1415,10 @@ export default class ChatNotesPlugin extends Plugin {
 
 		for (const container of getActiveContainers(this.app, file)) {
 			this.applyStyles(container, config);
+		}
+		for (const host of getEmbedHosts(this.app, file)) {
+			this.applyStyles(host, config);
+			this.styledEmbeds.set(host, config);
 		}
 
 		// once for the file, not once per container: it walks the rendered rows itself

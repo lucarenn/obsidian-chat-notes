@@ -161,6 +161,13 @@ lands in two places:
   and Live Preview re-inserts the DOM it cached for an off-screen block without re-running the
   processor — so the sweep left the rest of the file on the old colour until a rerender, and the
   inline value it wrote shadowed the container for good.
+
+  Embeds count as containers too. Canvas cards, embeds in other notes and hover popovers are
+  not leaves of the file, so `getActiveContainers` misses them, and their rows fell back to the
+  defaults in `styles.css`. Their `.markdown-embed` root (`embedHostOf`) gets the same styles:
+  from `applyConfigToFile` for embeds with rows on screen, and from `styleEmbedHost` when a row
+  is inserted into an embed that doesn't carry the current config yet. `saveSettings` includes
+  files that are only rendered in an embed (`getRenderedChatPaths`).
 - **`applyConfigToContext`** — the non-CSS values (`chatAuthor`, `defaultAuthorMode`) that
   the message-building code reads directly.
 

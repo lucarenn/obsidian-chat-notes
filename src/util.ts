@@ -404,6 +404,36 @@ export function getActiveContainers(app: App, file: TAbstractFile): HTMLElement[
 	return containers;
 }
 
+/* The embeds a row is rendered in: canvas cards, embeds in other notes and hover popovers all
+   use Obsidian's embed component, whose root carries `markdown-embed`. None of them is a leaf
+   of the file, so getActiveContainers can't reach them; each needs the file's styles on its
+   own root. The closest one, so a chat embedded in another chat's message gets its own. */
+export function embedHostOf(row: HTMLElement): HTMLElement | null {
+	const host = row.closest(".markdown-embed");
+	return host?.instanceOf(HTMLElement) ? host : null;
+}
+
+// every embed the file currently has rows in
+export function getEmbedHosts(app: App, file: TAbstractFile): HTMLElement[] {
+	const hosts = new Set<HTMLElement>();
+	for (const row of rowsFor(app, file.path)) {
+		const host = embedHostOf(row);
+		if (host) hosts.add(host);
+	}
+	return Array.from(hosts);
+}
+
+// paths of every chat file with a row on screen anywhere, embeds included
+export function getRenderedChatPaths(app: App): Set<string> {
+	const paths = new Set<string>();
+	for (const doc of chatDocuments(app)) {
+		for (const row of Array.from(doc.querySelectorAll(".chat-message-row[data-chat-src]"))) {
+			if (row.instanceOf(HTMLElement) && row.dataset.chatSrc) paths.add(row.dataset.chatSrc);
+		}
+	}
+	return paths;
+}
+
 /* The rendered rows of a chat file, found by querying rather than by remembering nodes. A
    message has one row per place it is rendered, and rows come and go as the view scrolls, so a
    stored reference goes stale while a query is right by construction.
