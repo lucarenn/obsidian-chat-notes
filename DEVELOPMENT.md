@@ -220,7 +220,7 @@ stop while a popout has focus. So every frame loop runs on the window of the ele
 on — the sticky updates, the scroll-on-send loop, and the polls in `waitForMessageRow` /
 `waitUntilVisible` (with the main window's frames, the reply flash never played). Frame ids are
 per window too, so a pending frame is cancelled through the window that scheduled it
-(`cancelResizeFrame` and `cancelScrollPin` hold a closure, not an id).
+(`cancelResizeFrame` and `cancelScrollHold` hold a closure, not an id).
 
 One thing is known **not** to be a problem, verified by hand: building DOM with the main
 document's `createElement` is fine, since `appendChild` adopts a node across documents.
@@ -297,8 +297,14 @@ render the write provokes reads the new model.
 **A write must not move the reader.** CodeMirror scrolls the selection into view on a document
 change, and replacing a block re-creates its widget — together they jump the view to wherever
 the caret happens to sit, which after a button click is usually elsewhere in the note. The
-editor branch captures `getScrollInfo()` and restores it, twice: immediately, and again on the
-next frame, since the re-created widget can resize as it renders. Reading View never sees this
+editor branch captures `getScrollInfo()` and holds it with `holdScroll` for 500 ms: the
+processor renders the new widget asynchronously, so its height keeps changing for several frames,
+and a single restore can land before the jump. The hold alone still showed a one-frame flash,
+since the new widget starts out empty and everything below it moves up before the correction
+runs, so `reserveBlock` also keeps the old height on the new block (`min-height` via
+`.chat-block-reserved`) until the processor has rendered it. It carries the old row's hover
+too (`is-hover-carried`): the new row isn't `:hover` until the pointer moves, which briefly
+swapped the author badge back over the reply button. Reading View never sees this
 because it has no editor and takes the `vault.process` branch.
 
 **An unknown message id is not an error.** `source` *is* the block, so a message the model
@@ -315,8 +321,8 @@ version to disk.
 
 **Scroll-on-send can't wait for the render.** The write only *schedules* the processor, and
 waiting for the new message to render deadlocks, since it renders *because* something scrolled
-to it. So `scrollToBottomAfterSend` scrolls immediately and keeps re-scrolling on
-`requestAnimationFrame` for 500 ms, dragging the render along.
+to it. So `scrollToBottomAfterSend` scrolls immediately and keeps re-scrolling through
+`holdScroll` for 500 ms, dragging the render along.
 
 **The next id is allocated inside the write.** `appendMessage` wraps the whole read-modify-
 write in `vault.process` and derives the id from *that* text, not from the cached model —
@@ -419,7 +425,7 @@ Pending timers are the same problem in time rather than space, so anything that 
 into the plugin is scheduled through `later()` and cancelled in `onunload` — `scheduleRefresh`
 being the one that matters, since its rerender ends in `handleFileSwitch` and would remount the
 chat input, keymap scopes and all, against a plugin that is gone. The `requestAnimationFrame`
-loops (`scrollToBottomAfterSend`, the resize coalescing) keep their handles for the same reason.
+loops (`holdScroll`, the resize coalescing) keep their handles for the same reason.
 Timers that only touch their own element — the copy button's icon reset, the header row's
 `focusout` tick, both in `ui.ts` — are deliberately left alone: that element is detached by the
 time they fire.

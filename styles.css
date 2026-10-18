@@ -33,6 +33,12 @@
     display: none;
 }
 
+/* a block re-created by an edit keeps its old height until it has rendered again
+   (see reserveBlock) */
+.chat-block-reserved {
+    min-height: var(--chat-reserved-height);
+}
+
 /* --------------------------------*/
 /* MESSAGE BUBBLE AND CONTENT */
 /* --------------------------------*/
@@ -585,7 +591,8 @@
 
 /* set on the row, not the button, so moving the mouse from bubble to button crosses no dead
    zone - and so the reply-target rule can raise the same two properties */
-.chat-message-row:hover {
+.chat-message-row:hover,
+.chat-message-row.is-hover-carried {
     --msg-reply-btn-opacity: 1;
     --msg-reply-btn-events: auto;
 }
@@ -632,7 +639,8 @@
 
 /* the reply button shares the right gutter on owner messages, so the badge fades out as
    it fades in - swapping the two in place rather than stacking them */
-.msg-show-author-badges .chat-message-row.is-owner:hover .msg-author-badge {
+.msg-show-author-badges .chat-message-row.is-owner:hover .msg-author-badge,
+.msg-show-author-badges .chat-message-row.is-owner.is-hover-carried .msg-author-badge {
     opacity: 0;
 }
 

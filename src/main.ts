@@ -20,8 +20,20 @@ function renderFallbackBlock(el: HTMLElement, source: string) {
 	el.appendChild(fallback);
 }
 
-// how long "Scroll to bottom on send" keeps re-scrolling (see scrollToBottomAfterSend)
-const SCROLL_ON_SEND_PIN_MS = 500;
+// how long holdScroll keeps re-applying a scroll position
+const SCROLL_HOLD_MS = 500;
+
+function blockKey(file: TFile, msgId: string): string {
+	return `${file.path}\n${msgId}`;
+}
+
+/* A row re-created under the pointer isn't :hover until the pointer moves again, so its
+   author badge and reply button would swap back for a moment. The class stands in for
+   :hover until then. */
+function carryHover(row: HTMLElement) {
+	row.classList.add("is-hover-carried");
+	row.doc.addEventListener("pointermove", () => row.classList.remove("is-hover-carried"), { once: true });
+}
 
 /* The element the chat input's geometry is measured from, per view mode. Obsidian keeps BOTH
    subviews mounted and hides the inactive one, so both of these exist at once - which is what
@@ -52,12 +64,15 @@ export default class ChatNotesPlugin extends Plugin {
 	// rows currently flagged as a reply target, with the file they belong to (see markReplyTarget)
 	private replyTargetRows = new Map<HTMLElement, TFile>();
 
+	// state of a block just rewritten in the editor, by blockKey (see reserveBlock)
+	private reservedBlocks = new Map<string, { height: number; hovered: boolean }>();
+
 	/* Timers the plugin can take back: Obsidian reclaims none of them, and a callback that lands
 	   after onunload runs against a plugin that is gone. */
 	private timeouts = new Set<number>();
 	// closures, not frame ids: these are scheduled in the view's own window, and frame ids
 	// are per window
-	private cancelScrollPin: (() => void) | null = null;
+	private cancelScrollHold: (() => void) | null = null;
 	private cancelResizeFrame: (() => void) | null = null;
 
 	activeEditor: {
@@ -297,6 +312,13 @@ export default class ChatNotesPlugin extends Plugin {
 					return;
 				}
 
+				// before the first await, so the empty block never paints at zero height
+				const reserved = this.getReservedBlock(file, source);
+				if (reserved) {
+					el.style.setProperty("--chat-reserved-height", `${reserved.height}px`);
+					el.classList.add("chat-block-reserved");
+				}
+
 				const context = await this.getArchiveContext(file);
 				const note = this.getChatNote(file);
 				const config = this.getConfigCache(file);
@@ -329,6 +351,7 @@ export default class ChatNotesPlugin extends Plugin {
 					// a half-typed or malformed block - show it as a plain code block rather
 					// than throwing inside a render callback
 					console.warn("Could not read chat message block", e);
+					el.classList.remove("chat-block-reserved");
 					renderFallbackBlock(el, source);
 					return;
 				}
@@ -351,6 +374,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 				// nothing to do for the pinned-only filter here: the row carries data-pinned
 				// and the container carries the filter class, so CSS covers it on mount
+				if (reserved?.hovered) carryHover(row);
 				el.appendChild(row);
 
 
@@ -374,6 +398,7 @@ export default class ChatNotesPlugin extends Plugin {
 					ctx.sourcePath,
 					renderChild
 				);
+				el.classList.remove("chat-block-reserved");
 
 			}
 		);
@@ -395,7 +420,7 @@ export default class ChatNotesPlugin extends Plugin {
 
 		for (const id of this.timeouts) window.clearTimeout(id);
 		this.timeouts.clear();
-		this.cancelScrollPin?.();
+		this.cancelScrollHold?.();
 		this.cancelResizeFrame?.();
 
 		this.forEachMarkdownView(view => {
@@ -935,23 +960,57 @@ export default class ChatNotesPlugin extends Plugin {
 			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 		if (!view) return;
 
-		// a send during the previous loop takes over from it rather than running alongside
-		this.cancelScrollPin?.();
+		this.holdScroll(view, () => scrollDocument(view, "bottom"));
+	}
+
+	/* Re-applies a scroll position every frame for a short window. The codeblock processor
+	   renders asynchronously, so the height of a written block keeps changing for several
+	   frames after the write, and a one-off scroll lands before that. A new hold replaces a
+	   running one. */
+	holdScroll(view: MarkdownView, apply: () => void) {
+		this.cancelScrollHold?.();
 
 		const start = performance.now();
 		const win = view.containerEl.win;
 
-		const pin = () => {
-			this.cancelScrollPin = null;
-			scrollDocument(view, "bottom");
+		const tick = () => {
+			this.cancelScrollHold = null;
+			apply();
 
-			if (performance.now() - start < SCROLL_ON_SEND_PIN_MS) {
-				const frame = win.requestAnimationFrame(pin);
-				this.cancelScrollPin = () => { win.cancelAnimationFrame(frame); };
+			if (performance.now() - start < SCROLL_HOLD_MS) {
+				const frame = win.requestAnimationFrame(tick);
+				this.cancelScrollHold = () => { win.cancelAnimationFrame(frame); };
 			}
 		};
 
-		pin();
+		tick();
+	}
+
+	/* Replacing a block re-creates its widget empty, and the processor fills it a few frames
+	   later. Until then everything below it moves up, which holdScroll can only correct a
+	   frame after it painted - so the new block keeps the old height until it has rendered. */
+	private reserveBlock(view: MarkdownView, file: TFile, msgId: string) {
+		const row = findMessageRows(this.app, file, msgId)
+			.find(row => isRowRendered(row) && view.contentEl.contains(row));
+		if (!row?.parentElement) return;
+
+		const key = blockKey(file, msgId);
+		const reserved = { height: row.parentElement.offsetHeight, hovered: row.matches(":hover") };
+		this.reservedBlocks.set(key, reserved);
+
+		// a block the write removed never re-renders to clear it
+		this.later(() => {
+			if (this.reservedBlocks.get(key) === reserved) this.reservedBlocks.delete(key);
+		}, SCROLL_HOLD_MS);
+	}
+
+	private getReservedBlock(file: TFile, source: string): { height: number; hovered: boolean } | undefined {
+		if (this.reservedBlocks.size === 0) return undefined;
+		try {
+			return this.reservedBlocks.get(blockKey(file, extractMessageIdFromSource(source)));
+		} catch {
+			return undefined;
+		}
 	}
 
 	/* Toggles the pinned-only filter for the view's file. State lives on the ChatNote, not on
@@ -1520,6 +1579,7 @@ export default class ChatNotesPlugin extends Plugin {
 			   in the note entirely. Toggling a pin should not move the reader. */
 			const cm = editor;
 			const scroll = cm.getScrollInfo();
+			if (view) this.reserveBlock(view, file, msgId);
 
 			cm.replaceRange(
 				replacement === null ? "" : replacement.join("\n") + "\n",
@@ -1527,10 +1587,8 @@ export default class ChatNotesPlugin extends Plugin {
 				{ line: block.endLine + 1, ch: 0 }
 			);
 
-			cm.scrollTo(scroll.left, scroll.top);
-			// again after layout settles - the re-created widget can resize as it renders,
-			// and the scroll correction has to land after that, not before
-			(view?.containerEl.win ?? window).requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
+			// held rather than restored once - the re-created widget resizes as it renders
+			if (view) this.holdScroll(view, () => cm.scrollTo(scroll.left, scroll.top));
 		} else {
 			await this.app.vault.process(file, () => updated);
 		}
@@ -1579,8 +1637,7 @@ export default class ChatNotesPlugin extends Plugin {
 				{ line: cm.lastLine(), ch: cm.getLine(cm.lastLine()).length }
 			);
 
-			cm.scrollTo(scroll.left, scroll.top);
-			(view?.containerEl.win ?? window).requestAnimationFrame(() => cm.scrollTo(scroll.left, scroll.top));
+			if (view) this.holdScroll(view, () => cm.scrollTo(scroll.left, scroll.top));
 		} else {
 			await this.app.vault.process(file, () => updated);
 		}
