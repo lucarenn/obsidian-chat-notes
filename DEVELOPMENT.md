@@ -34,6 +34,7 @@ author: Alice
 timestamp: 06.08.2026 14:33
 pinned: true
 reply_to: 9
+reactions: 👍 3, ❤️
 ~~~
 The message body, rendered as markdown.
 ````
@@ -42,7 +43,11 @@ The message body, rendered as markdown.
 - **Four backticks**, so a message body can contain ordinary three-backtick code blocks.
 - Header is `key: value` lines until the `~~~` separator. `id`, `author` and `timestamp`
   have real slots on `Header`; everything else lands in `Header.extra` and round-trips
-  untouched, that is how `pinned` and `reply_to` are stored without a format change.
+  untouched, that is how `pinned`, `reply_to` and `reactions` are stored without a format change.
+- **Reactions** are one line of comma-separated entries in the order first added: a token
+  (anything without whitespace or a comma, so imported custom emoji fit as `:name:`) and an
+  optional count, 1 when omitted. The line is removed when the last reaction goes.
+  `src/reactions.ts` owns parsing and serialising; read them through `readReactions`.
 - The body is normalised to open and close with a blank line, which is what makes
   `fromString` → `toString` stable.
 - **Ids are decimal strings, never numbers.** The plugin was built to hold imported
@@ -62,6 +67,7 @@ destructive, not the ones whose bugs are visible on screen.
 | `tests/message-format.test.ts` | `Message` / `Header` round-trip, blank-line preservation, header key order, `parseMessages`, `findMessageBlocks` |
 | `tests/numeric-ids.test.ts` | `compareNumericIds` / `incrementNumericId` at 19-digit snowflake length |
 | `tests/renumber.test.ts` | `renumberMessageIds` — the 1..N rewrite, `reply_to` remapping, duplicates |
+| `tests/reactions.test.ts` | Reaction parsing/serialising, add/remove, `setHeaderField` |
 | `tests/fixtures.ts` | `block()` / `note()` builders for chat-note text |
 
 Two things to know before adding to them:
@@ -85,7 +91,9 @@ Two things to know before adding to them:
 | `ui.ts` | All DOM building — chat input, message bubble, action menu, inline editor, reply banners, author badges |
 | `types.ts` | `Message` / `Header` (the file format), `ArchiveContext` (parsed file), `ChatNote` (per-file UI state) |
 | `settings.ts` | `ChatConfig` + settings interface, defaults, the settings tab, YAML override parsing |
-| `util.ts` | File-format parsing, id arithmetic, timestamps, colour contrast, scrolling helpers |
+| `util.ts` | File-format parsing, header patching (`setHeaderField`), id arithmetic, timestamps, colour contrast, scrolling helpers |
+| `reactions.ts` | The `reactions` header format and its add/remove operations (pure) |
+| `emoji-picker.ts` / `emoji-data.ts` | The reaction picker popover and its bundled emoji set |
 | `sticky.ts` | Manual `position: sticky` for gutter elements (see quirks) |
 | `modals.ts` | Delete-confirmation modal |
 | `styles.css` | All styling; consumes the `--settings-*` custom properties set from `main.ts` |
@@ -405,6 +413,18 @@ for a Live Preview cached re-insert. The Notice from `scrollToMessage` covers ex
 that leaves: a row rendered *before* the delete still carries a live-looking banner, and
 clicking it has to say why nothing happened.
 
+**Reactions sit outside the bubble.** The bubble's `overflow: hidden` would clip anything
+overlapping its edge, so the reaction bar is a sibling of the bubble inside the row, pulled up
+by a negative margin to straddle the bottom edge. The row carries `data-has-reactions`, which
+makes room for the bar in CSS and is the hook for a future "has reactions" filter, built the
+same way as the pinned-only one. A filter for one specific emoji can't be pure CSS (a container
+can't pass a value to a row-level selector, and runtime `<style>` is forbidden), so it would
+follow the reply-target pattern: a per-row flag set at render and re-synced on `onVisible`.
+
+The emoji picker is attached to the anchor's own `doc.body` with `position: fixed`, for the same
+clipping reason and so it works in popout windows. Only one is open at a time; it closes with
+its action menu (`closeMenu`), on a pick, Escape, an outside press, a scroll or a resize.
+
 **Text contrast is computed.** The bubble colour is arbitrary user input, so
 `getReadableTextColor` picks black or white and exposes it as `--settings-msg-text-color`,
 which the header, action icons, badge and rendered markdown all read. It parses colours by
@@ -468,7 +488,8 @@ emits `id` first), while `findMessageBlocks` searches the whole header, because
 an indented key and the other doesn't, that block keeps its old id and collides with the new
 numbering.
 
-Headers are patched line by line rather than re-serialised, as `toggleMessagePinned` does:
+Headers are patched line by line rather than re-serialised, as `setHeaderField` does for the
+pin and reactions:
 round-tripping through `Message.toString()` would reorder the header keys and renormalise the
 body, a large, surprising diff for a change to one line. The write replaces from the first block to the end of the document: dropping a
 `reply_to` changes the line count, so the blocks' own `endLine` no longer describes the patched

@@ -1,6 +1,7 @@
 import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig, DefaultAuthorMode } from "./settings";
 import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
+import type { ReactionChange } from "./reactions";
 import ChatNotesPlugin from "./main";
 
 
@@ -120,6 +121,8 @@ export type CreateHTMLParams = {
 	context: ArchiveContext;
 	onToggle: (menu: HTMLElement) => void;
 	onPin: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
+	onReaction: (msgId: string, change: ReactionChange, emoji: string) => void;
+	onReactionPicker: (msgId: string, anchor: HTMLElement) => void;
 	onReplyToggle: (msgId: string) => void;
 	syncReplyTarget: (row: HTMLElement, msgId: string) => void;
 	// `origin` is the row the banner was clicked in - the target is resolved in that same
@@ -135,6 +138,7 @@ export type CreateMenuParams = {
 	content: HTMLDivElement;
 	onToggle: (menu: HTMLElement) => void;
 	onPin: (msgId: string) => void;	// toggles pinned; the new state is decided at the write
+	onReactionPicker: (msgId: string, anchor: HTMLElement) => void;
 };
 
 

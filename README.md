@@ -54,6 +54,20 @@ Messages are written and render as Markdown (code blocks included).
 > therefore shortened to three when you send or save a message. Regular ``` code blocks work as
 > usual.
 
+## Reactions
+
+Select **Add reaction** in a message's action menu to pick an emoji, or type or paste any emoji
+into the picker's text field. Reactions appear as small buttons on the message's bottom edge.
+Adding the same emoji again increases its count, and selecting a reaction removes one.
+
+Reactions are stored as plain text in the message header, so they can also be written by hand:
+
+```text
+reactions: 👍 3, ❤️, 🎉 2
+```
+
+Each entry is an emoji with an optional count (1 when left out).
+
 ## Shortcuts
 
 These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cmd` on macOS.
@@ -172,6 +186,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, Markdown message editing/writing and better plugin compatibility in the future.
+I might implement additions like virtualized rendering, Markdown message editing/writing, custom search and better plugin compatibility in the future.
 
 > The plugin has not been tested on mobile.

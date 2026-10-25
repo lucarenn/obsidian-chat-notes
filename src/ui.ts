@@ -3,6 +3,7 @@ import { ConfirmDeleteModal } from "./modals";
 import { MessageEntry, CreateHTMLParams, CreateMenuParams } from "./types";
 import { scrollDocument, isValidTimestamp, clampBackticks, TIMESTAMP_PLACEHOLDER } from "./util";
 import { computeStickyOffset, registerSticky, DEFAULT_TOP_INSET, StickyInsets } from "./sticky";
+import { Reaction, readReactions } from "./reactions";
 import type ChatNotesPlugin from "./main";
 
 
@@ -368,7 +369,7 @@ export function removeChatViewActions(view: MarkdownView) {
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReplyToggle, syncReplyTarget, onScrollToReply} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReaction, onReactionPicker, onReplyToggle, syncReplyTarget, onScrollToReply} : CreateHTMLParams){
 
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
@@ -409,7 +410,8 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 		wrapper,
 		content,
 		onToggle,
-		onPin
+		onPin,
+		onReactionPicker
 	});
 
 	/* Create message header and add menu buttons to header */
@@ -455,10 +457,14 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 
 	const { badge, tail } = createAuthorBadge(author_text);
 
-	// after the bubble in DOM order, so the tail paints over the bubble's border ring
-	row.append(wrapper, replyBtn, badge);
+	// a sibling of the bubble, so it can straddle the bubble's bottom edge without being clipped
+	const reactionBar = createReactionBar((emoji) => onReaction(msg.header.id, "remove", emoji));
 
-	registerSticky(row, badge, ctx, () => tailInsets(row, badge, tail), resyncReplyTarget);
+	// after the bubble in DOM order, so the tail paints over the bubble's border ring
+	row.append(wrapper, reactionBar, replyBtn, badge);
+	updateReactionBar(row, readReactions(msg.header));
+
+	registerSticky(row, badge, ctx, () => tailInsets(row, wrapper, badge, tail), resyncReplyTarget);
 
 	return {
 		wrapper,
@@ -530,19 +536,59 @@ function createAuthorBadge(authorText: string): { badge: HTMLDivElement; tail: H
 
 // keeps the tail clear of the bubble's rounded corners, where it would otherwise hang off
 // the curve with a gap behind it. Given as room to leave at each end of the row, measured
-// back from where the tail sits within the badge.
-function tailInsets(row: HTMLElement, badge: HTMLElement, tail: HTMLElement): StickyInsets {
+// back from where the tail sits within the badge. The reaction bar extends the row below
+// the bubble, so that space is left out as well.
+function tailInsets(row: HTMLElement, bubble: HTMLElement, badge: HTMLElement, tail: HTMLElement): StickyInsets {
 	const radius = parseFloat(
 		getComputedStyle(row).getPropertyValue("--settings-msg-corner-radius")
 	) || 0;
 
 	const tailTop = tail.offsetTop;
 	const tailBottom = tailTop + tail.offsetHeight;
+	const belowBubble = Math.max(0, row.offsetHeight - (bubble.offsetTop + bubble.offsetHeight));
 
 	return {
 		top: Math.max(DEFAULT_TOP_INSET, radius - tailTop),
-		bottom: Math.max(0, radius + tailBottom - badge.offsetHeight)
+		bottom: belowBubble + Math.max(0, radius + tailBottom - badge.offsetHeight)
 	};
+}
+
+/* One click handler for the whole bar, reading the emoji off the pill, so the bar can be
+   refilled from anywhere (see updateReactionBar) without re-binding listeners. */
+function createReactionBar(onRemove: (emoji: string) => void): HTMLDivElement {
+	const bar = createDiv();
+	bar.className = "msg-reaction-bar";
+
+	bar.addEventListener("click", (e) => {
+		const pill = (e.target as HTMLElement | null)?.closest<HTMLElement>(".msg-reaction");
+		const emoji = pill?.dataset.emoji;
+		if (!emoji) return;
+
+		e.stopPropagation();
+		onRemove(emoji);
+	});
+
+	return bar;
+}
+
+/* Fills a row's reaction bar and sets its data-has-reactions flag, which styles.css uses to
+   show the bar and make room for it. */
+export function updateReactionBar(row: HTMLElement, reactions: Reaction[]) {
+	row.dataset.hasReactions = String(reactions.length > 0);
+
+	const bar = row.querySelector<HTMLElement>(":scope > .msg-reaction-bar");
+	if (!bar) return;
+
+	bar.empty();
+	for (const { emoji, count } of reactions) {
+		const pill = bar.createEl("button", { cls: "msg-reaction" });
+		pill.type = "button";
+		pill.dataset.emoji = emoji;
+		pill.setAttribute("aria-label", `Remove ${emoji} reaction`);
+
+		pill.createSpan({ cls: "msg-reaction-emoji", text: emoji });
+		if (count > 1) pill.createSpan({ cls: "msg-reaction-count", text: String(count) });
+	}
 }
 
 /* Manual `position: sticky` for the reply icon - see sticky.ts for why CSS sticky isn't
@@ -664,7 +710,8 @@ function createMessageActionsMenu({
 	wrapper,
 	content,
 	onToggle,
-	onPin
+	onPin,
+	onReactionPicker
 } : CreateMenuParams) {
 
 	const filePath = ctx.sourcePath;
@@ -714,7 +761,16 @@ function createMessageActionsMenu({
 		onPin(msg.header.id);
 	});
 
-	buttonContainer.append(editBtn, deleteBtn, copyBtn, favBtn, menuBtn);
+	const reactBtn = createEl("button");
+	reactBtn.className = "msg-action-btn msg-react-btn";
+	reactBtn.setAttribute("aria-label", "Add reaction");
+	setIcon(reactBtn, "smile-plus");
+	reactBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		onReactionPicker(msg.header.id, reactBtn);
+	});
+
+	buttonContainer.append(editBtn, deleteBtn, copyBtn, reactBtn, favBtn, menuBtn);
 	menu.append(buttonContainer, menuBtn);
 
 	/* ---------------- COPY ---------------- */

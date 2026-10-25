@@ -1,8 +1,10 @@
 import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types";
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings";
-import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions } from "./ui";
-import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getEmbedHosts, embedHostOf, getRenderedChatPaths, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller } from "./util";
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions, updateReactionBar } from "./ui";
+import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getEmbedHosts, embedHostOf, getRenderedChatPaths, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller, setHeaderField } from "./util";
+import { Reaction, ReactionChange, REACTIONS_KEY, readReactions, addReaction, removeReaction, serializeReactions } from "./reactions";
+import { EmojiPicker, openEmojiPicker } from "./emoji-picker";
 import { ConfirmModal } from "./modals"
 
 const NEW_CHAT_NOTE_NAME = "Untitled chat";
@@ -46,6 +48,7 @@ const INPUT_SIZER_SELECTORS = {
 export default class ChatNotesPlugin extends Plugin {
 
 	openMenu: HTMLElement | null = null;
+	private emojiPicker: EmojiPicker | null = null;
 	settings: ChatNotesPluginSettings;
 	chatInputEl: HTMLElement;
 	chatTextareaEl: HTMLTextAreaElement;
@@ -237,10 +240,7 @@ export default class ChatNotesPlugin extends Plugin {
 			if (!this.openMenu) return;
 			const target = event.target as HTMLElement;
 
-			if (!this.openMenu.contains(target)) {
-				this.openMenu.classList.remove("menu-open");
-				this.openMenu = null;
-			}
+			if (!this.openMenu.contains(target)) this.closeMenu();
 		});
 
 		/* on FILE SWITCH: move the chat input to the view showing the file, and swap the draft
@@ -369,6 +369,8 @@ export default class ChatNotesPlugin extends Plugin {
 					// acts on the message it belongs to rather than on whatever is focused
 					onToggle: this.handleMenuToggle.bind(this),				// callback for toggling the action menu
 					onPin: (targetId: string) => { void this.handleMessagePin(file, targetId); },
+					onReaction: (targetId: string, change: ReactionChange, emoji: string) => { void this.handleReaction(file, targetId, change, emoji); },
+					onReactionPicker: (targetId: string, anchor: HTMLElement) => this.toggleEmojiPicker(file, targetId, anchor),
 					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
 					syncReplyTarget: (row: HTMLElement, targetId: string) => this.syncRowReplyTarget(file, row, targetId),
 					// callback for the reply banner; `origin` is the row it was clicked in
@@ -420,6 +422,7 @@ export default class ChatNotesPlugin extends Plugin {
 	   blur (so the input's keymap scope would stay pushed and go on swallowing Mod+Enter),
 	   and view actions and the container class live on views the plugin doesn't own. */
 	onunload() {
+		this.closeMenu();
 		this.chatInputTeardown?.();
 		this.resizeObserver?.disconnect();
 		this.windowMigration?.();
@@ -792,14 +795,51 @@ export default class ChatNotesPlugin extends Plugin {
 	/* Message Actions */
 
 	handleMenuToggle(menu: HTMLElement) {
-		if (this.openMenu && this.openMenu !== menu) {
-			this.openMenu.classList.remove("menu-open");
-		}
-
 		const isOpening = !menu.classList.contains("menu-open");
-		menu.classList.toggle("menu-open");
-		this.openMenu = isOpening ? menu : null;
 
+		// the picker belongs to the open menu, so any toggle closes it
+		this.closeMenu();
+
+		if (isOpening) {
+			menu.classList.add("menu-open");
+			this.openMenu = menu;
+		}
+	}
+
+	closeMenu() {
+		this.closeEmojiPicker();
+
+		this.openMenu?.classList.remove("menu-open");
+		this.openMenu = null;
+	}
+
+	// a second press on the same button closes the picker instead of reopening it
+	toggleEmojiPicker(file: TFile, msgId: string, anchor: HTMLElement) {
+		const wasOpenHere = this.emojiPicker?.anchor === anchor;
+		this.closeEmojiPicker();
+		if (wasOpenHere) return;
+
+		const picker = openEmojiPicker(
+			anchor,
+			(emoji) => { void this.handleReaction(file, msgId, "add", emoji); },
+			() => { if (this.emojiPicker === picker) this.emojiPicker = null; }
+		);
+		this.emojiPicker = picker;
+	}
+
+	closeEmojiPicker() {
+		this.emojiPicker?.close();
+		this.emojiPicker = null;
+	}
+
+	async handleReaction(file: TFile, msgId: string, change: ReactionChange, emoji: string) {
+		const reactions = await this.changeReaction(file, msgId, change, emoji);
+		if (reactions === null) return;
+
+		// now rather than on the re-render the write triggers, so the click feels immediate
+		for (const row of findMessageRows(this.app, file, msgId)) {
+			updateReactionBar(row, reactions);
+		}
 	}
 
 	/* The pinned state is flipped inside the write, against the file's own text, so two quick
@@ -1696,37 +1736,35 @@ export default class ChatNotesPlugin extends Plugin {
 
 		let pinned: boolean | null = null;
 
-		const ok = await this.withMessageBlock(file, msgId, ({ lines }) => {
-			/* Patched in place rather than round-tripped through Message.toString(), which
-			   would reorder the header's keys and renormalise the body - a large, surprising
-			   diff for one flag. On a malformed block the lines go back untouched, NOT null:
-			   null means "delete this block". */
-			const headerEnd = lines.indexOf("~~~");
-			if (headerEnd === -1) return lines;
+		/* Patched in place rather than round-tripped through Message.toString(), which would
+		   reorder the header's keys and renormalise the body - a large diff for one flag. */
+		const ok = await this.withMessageBlock(file, msgId, ({ message, lines }) => {
+			if (!lines.includes("~~~")) return lines;
 
-			// searched in the header only: a message body is free to contain a line that
-			// happens to start with "pinned:", and it must not be mistaken for the flag
-			const existing = lines
-				.slice(0, headerEnd)
-				.findIndex(line => line.startsWith("pinned:"));
-
-			// the value the way Header.fromLines reads it, so "pinned:true" counts too
-			const wasPinned = existing !== -1
-				&& lines[existing]?.slice("pinned:".length).trim() === "true";
-
-			pinned = !wasPinned;
-
-			const updated = [...lines];
-			if (existing !== -1) {
-				updated[existing] = `pinned: ${pinned}`;
-			} else {
-				updated.splice(headerEnd, 0, `pinned: ${pinned}`);
-			}
-
-			return updated;
+			pinned = message.header.extra.pinned !== "true";
+			return setHeaderField(lines, "pinned", String(pinned));
 		});
 
 		return ok ? pinned : null;
+	}
+
+	/* Adds or removes one reaction and reports the resulting list (null if the write didn't
+	   happen). Decided from the file's own text inside the write, like the pin. */
+	async changeReaction(file: TFile, msgId: string, change: ReactionChange, emoji: string): Promise<Reaction[] | null> {
+
+		let reactions: Reaction[] | null = null;
+
+		const ok = await this.withMessageBlock(file, msgId, ({ message, lines }) => {
+			if (!lines.includes("~~~")) return lines;
+
+			const current = readReactions(message.header);
+			const next = change === "add" ? addReaction(current, emoji) : removeReaction(current, emoji);
+			reactions = next;
+
+			return setHeaderField(lines, REACTIONS_KEY, next.length > 0 ? serializeReactions(next) : null);
+		});
+
+		return ok ? reactions : null;
 	}
 }
 

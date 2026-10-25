@@ -130,6 +130,37 @@ export function clampBackticks(content: string): string {
 	return content.replace(/`{4,}/g, "`".repeat(MAX_CONTENT_BACKTICKS));
 }
 
+/* Sets one header key on a block's lines (fence lines included), in place: an existing line is
+   rewritten where it is, a new one goes just above "~~~", and null removes it. Keys match the way
+   Header.fromLines reads them, and only the header is searched. A block without a separator is
+   returned unchanged. */
+export function setHeaderField(lines: string[], key: string, value: string | null): string[] {
+	const headerEnd = lines.indexOf("~~~");
+	if (headerEnd === -1) return lines;
+
+	const matches: number[] = [];
+	lines.slice(0, headerEnd).forEach((line, index) => {
+		const colon = line.indexOf(":");
+		if (colon !== -1 && line.slice(0, colon).trim() === key) matches.push(index);
+	});
+
+	const updated = [...lines];
+
+	// duplicates of the key are dropped, so the line written is the one that is read back
+	for (const index of matches.slice(1).reverse()) updated.splice(index, 1);
+
+	const first = matches[0];
+	if (value === null) {
+		if (first !== undefined) updated.splice(first, 1);
+	} else if (first !== undefined) {
+		updated[first] = `${key}: ${value}`;
+	} else {
+		updated.splice(headerEnd, 0, `${key}: ${value}`);
+	}
+
+	return updated;
+}
+
 export function scrollDocument(view: MarkdownView, position: "top" | "bottom") {
 	const preview = view.containerEl.querySelector(".markdown-preview-view");
 	const cmScroller = view.containerEl.querySelector(".cm-scroller");
