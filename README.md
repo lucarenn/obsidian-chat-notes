@@ -66,7 +66,8 @@ Reactions are stored as plain text in the message header, so they can also be wr
 reactions: 👍 3, ❤️, 🎉 2
 ```
 
-Each entry is an emoji with an optional count (1 when left out).
+Each entry is an emoji with an optional count (1 when left out). Entries that don't follow this
+format are ignored, and are removed from the line the next time a reaction is added or removed.
 
 ## Shortcuts
 

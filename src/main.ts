@@ -1611,59 +1611,77 @@ export default class ChatNotesPlugin extends Plugin {
 			.find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 
 		const editor = view?.getMode() === "source" ? view.editor : undefined;
-		const text = editor ? editor.getValue() : await this.app.vault.read(file);
 
-		const [messages] = parseMessages(text);
-		const block = messages.get(msgId);
-		if (!block) {
-			new Notice("That message is no longer in the file");
-			return false;
-		}
-
-		const lines = text.split("\n");
-		const blockLines = lines.slice(block.startLine, block.endLine + 1);
-		const replacement = transform({ message: block.message, lines: blockLines });
-
-		const updatedLines = [...lines];
-		updatedLines.splice(
-			block.startLine,
-			block.endLine - block.startLine + 1,
-			...(replacement ?? [])
-		);
-		const updated = updatedLines.join("\n");
-
-		/* Refresh the model from the text about to be written, BEFORE writing it - not after,
-		   and not by waiting for the debounced metadata cache. The write re-renders the block,
-		   and the codeblock processor is async: it captures a context, yields, and resumes with
-		   it. Refreshing afterwards means it captured the pre-write model and rebuilt the row
-		   describing the old state, which no sweep can fix - the row doesn't exist yet.
+		/* Locates the block in `text`, applies the transform and refreshes the model from the
+		   result, BEFORE it is written - not after, and not by waiting for the debounced metadata
+		   cache. The write re-renders the block, and the codeblock processor is async: it captures
+		   a context, yields, and resumes with it. Refreshing afterwards means it captured the
+		   pre-write model and rebuilt the row describing the old state, which no sweep can fix -
+		   the row doesn't exist yet.
 
 		   If the write then fails, the model is briefly ahead of the file; the next metadata
 		   change puts it back. */
-		this.invalidateArchiveContext(file, updated);
+		const rewrite = (text: string) => {
+			const [messages] = parseMessages(text);
+			const block = messages.get(msgId);
+			if (!block) return null;
+
+			const lines = text.split("\n");
+			const blockLines = lines.slice(block.startLine, block.endLine + 1);
+			const replacement = transform({ message: block.message, lines: blockLines });
+
+			const updatedLines = [...lines];
+			updatedLines.splice(
+				block.startLine,
+				block.endLine - block.startLine + 1,
+				...(replacement ?? [])
+			);
+			const updated = updatedLines.join("\n");
+
+			this.invalidateArchiveContext(file, updated);
+			return { block, replacement, updated };
+		};
+
+		let found = false;
 
 		if (editor) {
-			/* CodeMirror scrolls the selection into view on a document change, and replacing
-			   the block re-creates its widget. Between them the view jumps - to wherever the
-			   caret happens to sit, which after clicking a button is usually somewhere else
-			   in the note entirely. Toggling a pin should not move the reader. */
-			const cm = editor;
-			const scroll = cm.getScrollInfo();
-			if (view) this.reserveBlock(view, file, msgId);
+			// synchronous from read to write, so nothing can land in between
+			const result = rewrite(editor.getValue());
 
-			cm.replaceRange(
-				replacement === null ? "" : replacement.join("\n") + "\n",
-				{ line: block.startLine, ch: 0 },
-				{ line: block.endLine + 1, ch: 0 }
-			);
+			if (result) {
+				found = true;
+				const { block, replacement } = result;
 
-			// held rather than restored once - the re-created widget resizes as it renders
-			if (view) this.holdScroll(view, () => cm.scrollTo(scroll.left, scroll.top));
+				/* CodeMirror scrolls the selection into view on a document change, and replacing
+				   the block re-creates its widget. Between them the view jumps - to wherever the
+				   caret happens to sit, which after clicking a button is usually somewhere else
+				   in the note entirely. Toggling a pin should not move the reader. */
+				const cm = editor;
+				const scroll = cm.getScrollInfo();
+				if (view) this.reserveBlock(view, file, msgId);
+
+				cm.replaceRange(
+					replacement === null ? "" : replacement.join("\n") + "\n",
+					{ line: block.startLine, ch: 0 },
+					{ line: block.endLine + 1, ch: 0 }
+				);
+
+				// held rather than restored once - the re-created widget resizes as it renders
+				if (view) this.holdScroll(view, () => cm.scrollTo(scroll.left, scroll.top));
+			}
 		} else {
-			await this.app.vault.process(file, () => updated);
+			/* The whole read-modify-write runs inside process, on the text it hands over. A
+			   vault.read before it would leave a gap: two quick writes (a reaction pill clicked
+			   twice) both read the same text, and the second overwrote the first. */
+			await this.app.vault.process(file, (data) => {
+				const result = rewrite(data);
+				found = result !== null;
+				return result ? result.updated : data;
+			});
 		}
 
-		return true;
+		if (!found) new Notice("That message is no longer in the file");
+		return found;
 	}
 
 	/* Repairs a file whose ids were broken by hand (duplicates, gaps, pasted blocks). The
