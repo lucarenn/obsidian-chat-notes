@@ -991,7 +991,9 @@
     align-items: center;
     gap: 8px;
 
-    margin-top: 1%;
+    /* fixed, not a percentage: a % margin follows the pane's width, which let the bar drop and
+       show the view header's file name cut off above it in wide panes */
+    margin-top: 5px;
     padding: var(--chat-input-pad-y) var(--chat-input-pad-x);
 
     background: var(--background-primary);
