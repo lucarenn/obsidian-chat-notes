@@ -357,6 +357,13 @@ export function addPinButton(view: MarkdownView, onPress: ()=>void) {
 	addViewAction(view, "pin", "Show pinned messages", () => onPress());
 }
 
+export function addSearchButton(view: MarkdownView, onPress: ()=>void) {
+
+	if (!view) return;
+
+	addViewAction(view, "search", "Search messages", () => onPress());
+}
+
 // dropped when the view moves to a note that isn't a chat, and for every open view on unload
 export function removeChatViewActions(view: MarkdownView) {
 	const actions = viewActions.get(view);
@@ -369,7 +376,7 @@ export function removeChatViewActions(view: MarkdownView) {
 /**
 Create HTML elements for messages
 */
-export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReaction, onReactionPicker, onReplyToggle, syncReplyTarget, onScrollToReply} : CreateHTMLParams){
+export function createElementsHTML({plugin, ctx, msg, author_text, context, onToggle, onPin, onReaction, onReactionPicker, onReplyToggle, syncReplyTarget, syncSearch, onScrollToReply} : CreateHTMLParams){
 
 	// the row reserves a fixed gutter (via the bubble's margin, see styles.css) so the reply
 	// button always has room inside the row's own box and can't be clipped by an ancestor's
@@ -395,6 +402,10 @@ export function createElementsHTML({plugin, ctx, msg, author_text, context, onTo
 	   (via registerSticky below) as well as set here. */
 	const resyncReplyTarget = () => syncReplyTarget(row, msg.header.id);
 	resyncReplyTarget();
+
+	/* The search filter's data-search-match flag. Set here only: a query change re-syncs every
+	   row the plugin has rendered, detached ones included (see syncSearchRows). */
+	syncSearch(row, msg);
 
 	const wrapper = createDiv();
 	wrapper.className = "chat-message";

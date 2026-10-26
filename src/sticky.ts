@@ -167,6 +167,14 @@ function getGroup(scroller: Element): ScrollerGroup {
 	return group;
 }
 
+/* Re-places every tracked element now rather than on the next scroll. A config change moves
+   them without scrolling: turning the author badges on reveals badges still carrying the
+   offset they had when they were hidden (updateEntry skips hidden ones), and the corner radius
+   feeds the insets. Cheap - one frame per scroller, on-screen rows only. */
+export function refreshSticky() {
+	for (const group of groups.values()) group.onScroll();
+}
+
 function unregister(scroller: Element, entry: StickyEntry) {
 	const group = groups.get(scroller);
 	if (!group) return;

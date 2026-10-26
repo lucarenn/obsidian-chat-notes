@@ -68,6 +68,7 @@ destructive, not the ones whose bugs are visible on screen.
 | `tests/numeric-ids.test.ts` | `compareNumericIds` / `incrementNumericId` at 19-digit snowflake length |
 | `tests/renumber.test.ts` | `renumberMessageIds` — the 1..N rewrite, `reply_to` remapping, duplicates |
 | `tests/reactions.test.ts` | Reaction parsing/serialising, add/remove, `setHeaderField` |
+| `tests/search.test.ts` | `parseSearchQuery` / `messageMatches` — which fields a search looks at |
 | `tests/fixtures.ts` | `block()` / `note()` builders for chat-note text |
 
 Two things to know before adding to them:
@@ -94,6 +95,9 @@ Two things to know before adding to them:
 | `util.ts` | File-format parsing, header patching (`setHeaderField`), id arithmetic, timestamps, colour contrast, scrolling helpers |
 | `reactions.ts` | The `reactions` header format and its add/remove operations (pure) |
 | `emoji-picker.ts` / `emoji-data.ts` | The reaction picker popover and its bundled emoji set |
+| `search.ts` | The search query and which messages it matches (pure) |
+| `search-bar.ts` | The search bar: field, match count, debounce, keymap scope |
+| `filter-extension.ts` | CodeMirror field that collapses filtered-out messages in Live Preview |
 | `sticky.ts` | Manual `position: sticky` for gutter elements (see quirks) |
 | `modals.ts` | Delete-confirmation modal |
 | `styles.css` | All styling; consumes the `--settings-*` custom properties set from `main.ts` |
@@ -270,6 +274,11 @@ fixed delay: Reading View runs the codeblock processor for sections ahead of the
 inserts them only as they scroll near, so a message further down can sit detached for as long
 as the reader takes to get there. A single-frame wait would register only the rows near the view.
 
+Positions are only recomputed on scroll and resize, and a hidden element (badges switched off)
+is skipped, so it keeps its last offset. Anything that moves the elements without scrolling has
+to call `refreshSticky()`. `applyConfigToFile` does, which is what places the badges correctly the
+moment they are switched back on, and after a corner radius change.
+
 **Off-screen messages have no row.** Both view modes only render near the viewport, so a
 message far away has no node at all. `scrollToMessage` therefore jumps to its *source line*
 first (`setEphemeralState`), which mounts it via the codeblock processor, then polls
@@ -420,6 +429,51 @@ makes room for the bar in CSS and is the hook for a future "has reactions" filte
 same way as the pinned-only one. A filter for one specific emoji can't be pure CSS (a container
 can't pass a value to a row-level selector, and runtime `<style>` is forbidden), so it would
 follow the reply-target pattern: a per-row flag set at render and re-synced on `onVisible`.
+
+**The search filter is a row flag synced from a registry of every rendered row.** It hides rows
+the way the pinned-only filter does — `.msg-search-active` on the container, `data-search-match`
+on the row — but whether a row matches changes with every query, so a query change has to reach
+rows that are not in the document: Live Preview's widget cache and Reading View's off-screen
+sections both keep rendered rows *detached*, and put them back carrying whatever flag they had.
+The reply-target answer (re-check on `onVisible`) came a frame late here: the row showed, then
+vanished, and Reading View had already measured it at full height by then. So the plugin keeps
+`chatRows`, every row it has rendered with the message it was rendered from, and `syncSearchRows`
+re-flags all of them synchronously. An entry goes when its block's render child unloads, so the
+map holds what the views hold and no more. Clearing the search only removes the container class.
+
+**Hiding a row doesn't give its space back by itself.** Both view modes lay out what is off
+screen from stored or estimated heights, not from the DOM.
+
+- *Live Preview:* CodeMirror reserves an *estimated* height for lines it hasn't rendered, so a
+  filtered row shrank to zero only once it had rendered. Two matches far apart came out with a
+  large blank gap between them, and the later one sat below it until scrolling had rendered and
+  collapsed everything in between (after that CodeMirror remembers the measured heights, which
+  makes it hard to reproduce). `filter-extension.ts` fixes this for both filters. A `StateField`
+  of replacing block decorations at the highest precedence collapses each run of hidden messages
+  to a zero-height widget, so those lines are never rendered or estimated. It recomputes on a
+  refresh effect, which the plugin dispatches when a filter changes or the model is rebuilt, and
+  on a mode switch. A plain document change only maps it, so typing doesn't reparse the file. The
+  range maths (`hiddenLineRanges`, which also swallows the blank lines between hidden blocks) is
+  pure and tested.
+- *Reading View:* the renderer measures every section once and lays out the detached ones by
+  those heights. After a filter change they were stale: hidden messages kept their old height as
+  empty scroll space, and a later match only appeared once scrolled to where it *used to* be.
+  `remeasureReadingViews` resets the measurements and queues a render, which is what the
+  renderer does itself after a width change. It re-measures without re-running the codeblock
+  processors. That is **private API** (`previewMode.renderer`, `sections[].resetCompute`,
+  `queueRender`), probed like `rebuildView`; if a future Obsidian drops it, the filter still
+  works and only the stale space comes back. It runs after `syncSearchRows`, because the
+  renderer measures the rows as soon as it re-attaches them. The author badge setting is the
+  one other thing that changes a message's height without a rerender (the wider gutter
+  re-wraps every bubble), so `applyConfigToFile` re-measures when that value changes. Anything
+  new that alters row height through a container class or variable needs the same.
+
+`search.ts` holds what a query *is* and what it matches, and nothing else knows. More conditions
+(dates, "has reactions") become fields on `SearchQuery`, parsed in `parseSearchQuery` and ANDed in
+`messageMatches`. The bar is one element moved between views like the chat input, but it tracks
+its own `searchFile` rather than `currentFile`, since a background pane's search button opens it
+there. Its debounce is flushed when the bar moves to another file, so text typed for one note
+never lands on the next.
 
 The emoji picker is attached to the anchor's own `doc.body` with `position: fixed`, for the same
 clipping reason and so it works in popout windows. Only one is open at a time; it closes with

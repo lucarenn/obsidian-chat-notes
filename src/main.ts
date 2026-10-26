@@ -1,7 +1,11 @@
 import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types";
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings";
-import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, removeChatViewActions, updateReactionBar } from "./ui";
+import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addSearchButton, removeChatViewActions, updateReactionBar } from "./ui";
+import { createSearchBar } from "./search-bar";
+import { parseSearchQuery, messageMatches, isFilteredOut, MessageFilter } from "./search";
+import { createFilterExtension } from "./filter-extension";
+import { refreshSticky } from "./sticky";
 import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getEmbedHosts, embedHostOf, getRenderedChatPaths, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller, setHeaderField } from "./util";
 import { Reaction, ReactionChange, REACTIONS_KEY, readReactions, addReaction, removeReaction, serializeReactions } from "./reactions";
 import { EmojiPicker, openEmojiPicker } from "./emoji-picker";
@@ -61,11 +65,24 @@ export default class ChatNotesPlugin extends Plugin {
 	ribbonIconEl: HTMLElement | null = null;
 	chatInputTeardown: (() => void) | null = null;
 
+	// the one search bar, built lazily and moved between views like the chat input
+	private searchBar: ReturnType<typeof createSearchBar> | null = null;
+	// the file the search bar is mounted for - not currentFile, since the search button of a
+	// background pane opens it there
+	private searchFile: TFile | null = null;
+
+	// collapses filtered-out messages in Live Preview (see filter-extension.ts)
+	private filterExtension = createFilterExtension(file => this.getMessageFilter(file));
+
 	private chatNotes = new WeakMap<TFile, ChatNote>();			// holds metadata and cache of the files
 	private archiveContexts = new Map<string, Promise<ArchiveContext>>();	// holds messages/content of the files
 
 	// rows currently flagged as a reply target, with the file they belong to (see markReplyTarget)
 	private replyTargetRows = new Map<HTMLElement, TFile>();
+
+	// every rendered row, with what it was rendered from, including rows the view keeps
+	// detached (see syncSearchRows); dropped when the row's render child unloads
+	private chatRows = new Map<HTMLElement, { file: TFile; message: Message }>();
 
 	// the config each embed host was last styled with (see styleEmbedHost)
 	private styledEmbeds = new WeakMap<HTMLElement, ChatConfig>();
@@ -126,6 +143,8 @@ export default class ChatNotesPlugin extends Plugin {
 
 		await this.loadSettings();
 
+		this.registerEditorExtension(this.filterExtension.extension);
+
 		this.addCommand({
 			id: "create-chat-note",
 			name: "Create new chat note",
@@ -184,6 +203,19 @@ export default class ChatNotesPlugin extends Plugin {
 				const canRun = !!view?.file && this.getIsChatNote(view.file);
 				if (canRun && !checking) {
 					scrollDocument(view, "top");
+				}
+				return canRun;
+			},
+		});
+
+		this.addCommand({
+			id: "search-chat-note",
+			name: "Search messages",
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const canRun = !!view?.file && this.getIsChatNote(view.file);
+				if (canRun && !checking) {
+					this.openSearch(view);
 				}
 				return canRun;
 			},
@@ -373,6 +405,7 @@ export default class ChatNotesPlugin extends Plugin {
 					onReactionPicker: (targetId: string, anchor: HTMLElement) => this.toggleEmojiPicker(file, targetId, anchor),
 					onReplyToggle: (targetId: string) => { void this.handleReplyToggle(file, targetId); },
 					syncReplyTarget: (row: HTMLElement, targetId: string) => this.syncRowReplyTarget(file, row, targetId),
+					syncSearch: (row: HTMLElement, rowMsg: Message) => this.syncRowSearch(file, row, rowMsg),
 					// callback for the reply banner; `origin` is the row it was clicked in
 					onScrollToReply: (targetId: string, origin: HTMLElement) => { void this.scrollToMessage(file, targetId, { origin }); }
 				});
@@ -381,6 +414,7 @@ export default class ChatNotesPlugin extends Plugin {
 				// and the container carries the filter class, so CSS covers it on mount
 				if (reserved?.hovered) carryHover(row);
 				el.appendChild(row);
+				this.chatRows.set(row, { file, message: msg });
 
 				// not once: Live Preview re-inserts cached rows, which may be the first sign of
 				// an embed opened since the config last changed
@@ -399,6 +433,9 @@ export default class ChatNotesPlugin extends Plugin {
 				   the block does, instead of living until the plugin unloads. */
 				const renderChild = new MarkdownRenderChild(content);
 				ctx.addChild(renderChild);
+
+				// the block is gone for good, so a search can stop tracking its row
+				renderChild.register(() => { this.chatRows.delete(row); });
 
 				await MarkdownRenderer.render(
 					this.app,
@@ -427,6 +464,10 @@ export default class ChatNotesPlugin extends Plugin {
 		this.resizeObserver?.disconnect();
 		this.windowMigration?.();
 		this.chatInputEl?.remove();
+		this.searchBar?.teardown();
+		this.searchBar?.container.parentElement?.classList.remove("chat-search-open");
+		this.searchBar?.container.remove();
+		this.chatRows.clear();
 
 		for (const id of this.timeouts) window.clearTimeout(id);
 		this.timeouts.clear();
@@ -492,6 +533,7 @@ export default class ChatNotesPlugin extends Plugin {
 			input.setCssStyles({ display: "none" });
 			this.resizeObserver?.disconnect();
 			this.currentFile = null;
+			this.syncSearchBar(null);
 			void this.updateReplyBanner();
 			return;
 		}
@@ -517,6 +559,9 @@ export default class ChatNotesPlugin extends Plugin {
 		addScrollButtons(view);
 		// bound to this view, so the button filters the file it belongs to
 		addPinButton(view, () => this.togglePinFilter(view));
+		addSearchButton(view, () => this.toggleSearch(view));
+
+		this.syncSearchBar(view);
 
 		input.setCssStyles({ display: "flex" });
 		// contentEl, not a mode-specific element: it survives a reading <-> live preview switch,
@@ -690,6 +735,9 @@ export default class ChatNotesPlugin extends Plugin {
 		// a negative width is dropped by the browser, stranding the input at its old width
 		input.style.width = `${Math.max(0, rect.width - gutter * 2 + widthOffset)}px`;
 		input.style.left = `${offsetLeft + gutter - widthOffset / 2}px`;
+
+		// the search bar shares the input's geometry, so it lines up with it and the bubbles
+		this.searchBar?.container.setCssStyles({ width: input.style.width, left: input.style.left });
 
 	}
 
@@ -1070,7 +1118,18 @@ export default class ChatNotesPlugin extends Plugin {
 		const note = this.getChatNote(file);
 		note.pinFilter = !note.pinFilter;
 
+		// the animation measures the rows first, so the editor only collapses after it
 		this.applyPinFilter(file, { animate: true });
+		this.filterExtension.refresh(file);
+		this.remeasureReadingViews(file);
+	}
+
+	// the filters in effect for a file, or null when nothing is filtered
+	getMessageFilter(file: TFile): MessageFilter | null {
+		const note = this.getChatNote(file);
+		const pinnedOnly = note.pinFilter === true;
+		if (!pinnedOnly && !note.searchQuery) return null;
+		return { pinnedOnly, query: note.searchQuery };
 	}
 
 	/* Applies the pinned-only filter by putting one class on each of the file's containers. The
@@ -1112,6 +1171,177 @@ export default class ChatNotesPlugin extends Plugin {
 		}
 	}
 
+	/* Search */
+
+	getSearchBar() {
+		if (!this.searchBar) this.searchBar = createSearchBar(this);
+		return this.searchBar;
+	}
+
+	/* Mounts the search bar on `view` if its file has the search open, and hides it otherwise.
+	   Run on every file switch, like the chat input's mounting in onFileSwitch. */
+	syncSearchBar(view: MarkdownView | null) {
+		const bar = this.getSearchBar();
+		const file = view?.file ?? null;
+
+		// what was typed for the file being left still applies to that file
+		if (this.searchFile !== file) bar.flushPending();
+
+		bar.container.parentElement?.classList.remove("chat-search-open");
+
+		if (!view || !file || !this.getChatNote(file).searchOpen) {
+			bar.container.setCssStyles({ display: "none" });
+			this.searchFile = null;
+			return;
+		}
+
+		/* Refilled only when the bar arrives from another file (or from closed). Focus moving
+		   between two panes of the same note re-runs this too, and refilling then would replace
+		   text still waiting on the debounce with the last applied query. */
+		if (this.searchFile !== file) {
+			bar.input.value = this.getChatNote(file).searchText ?? "";
+		}
+
+		this.searchFile = file;
+		if (bar.container.parentElement !== view.contentEl) {
+			view.contentEl.appendChild(bar.container);
+		}
+		// clears the first message from under the bar (see styles.css)
+		view.contentEl.classList.add("chat-search-open");
+		bar.container.setCssStyles({ display: "flex" });
+
+		this.updateChatInputPosition(view);
+		void this.updateSearchCount(file);
+	}
+
+	toggleSearch(view: MarkdownView) {
+		const file = view.file;
+		if (file && this.getChatNote(file).searchOpen && this.searchFile === file) {
+			this.closeSearch();
+		} else {
+			this.openSearch(view);
+		}
+	}
+
+	openSearch(view: MarkdownView) {
+		const file = view.file;
+		if (!file) return;
+
+		this.getChatNote(file).searchOpen = true;
+		this.syncSearchBar(view);
+
+		const input = this.getSearchBar().input;
+		input.focus();
+		input.select();
+	}
+
+	// closing also clears the filter: a hidden filter with nothing on screen to explain it
+	// would look like lost messages
+	closeSearch() {
+		const file = this.searchFile;
+		if (!file) return;
+
+		// or a debounce still pending would put the query straight back
+		this.getSearchBar().cancelPending();
+
+		this.setSearchQuery("");
+		this.getChatNote(file).searchOpen = false;
+		this.syncSearchBar(null);
+
+		// back to the chat rather than leaving focus on a field that just disappeared
+		if (this.currentFile === file) this.chatTextareaEl?.focus();
+	}
+
+	// what the search field's debounce calls, for the file the bar is mounted for
+	setSearchQuery(raw: string) {
+		const file = this.searchFile;
+		if (!file) return;
+
+		const note = this.getChatNote(file);
+		note.searchText = raw;
+		note.searchQuery = parseSearchQuery(raw) ?? undefined;
+
+		this.applySearchFilter(file);
+		this.syncSearchRows(file);
+		this.filterExtension.refresh(file);
+		// after the rows are synced: it measures them
+		this.remeasureReadingViews(file);
+		void this.updateSearchCount(file);
+	}
+
+	/* The switch for the search filter: one class on each of the file's containers, matched in
+	   styles.css against the data-search-match flag on each row. Unlike the pinned flag, that
+	   one changes with every query, so it is kept current by syncRowSearch below. */
+	applySearchFilter(file: TFile) {
+		const on = this.getChatNote(file).searchQuery !== undefined;
+		for (const container of getActiveContainers(this.app, file)) {
+			container.classList.toggle("msg-search-active", on);
+		}
+	}
+
+	// sets a row's data-search-match flag from the file's current query
+	syncRowSearch(file: TFile, row: HTMLElement, message: Message) {
+		const query = this.getChatNote(file).searchQuery;
+		const match = !query || messageMatches(message, query);
+		row.dataset.searchMatch = String(match);
+	}
+
+	/* Brings every row of the file in line with a new query, synchronously - from the registry,
+	   not a DOM query. Both view modes keep rendered rows DETACHED (Live Preview's widget cache,
+	   Reading View's off-screen sections) where no query reaches them, and they come back
+	   carrying whatever flag they had. Re-checking them only once back in view showed them for
+	   a frame first, and Reading View measures them on insertion, before any check could run. */
+	private syncSearchRows(file: TFile) {
+		for (const [row, { file: rowFile, message }] of this.chatRows) {
+			if (rowFile === file) this.syncRowSearch(file, row, message);
+		}
+	}
+
+	/* Reading View measures every section once and lays the off-screen ones out by those stored
+	   heights. A filter change leaves them stale: hidden messages kept their full height as
+	   blank space, and later matches only appeared once scrolled to where they USED to be.
+	   Resetting the measurements and queueing a render is what the renderer does itself after a
+	   width change; it re-measures without re-running the codeblock processors. NOT public API,
+	   so it is probed, and a renderer that doesn't have it is left as it was. */
+	private remeasureReadingViews(file: TFile) {
+		type PreviewRenderer = {
+			sections?: { resetCompute?: () => void }[];
+			queueRender?: () => void;
+		};
+
+		this.forEachMarkdownView(view => {
+			if (view.file !== file || view.getMode() !== "preview") return;
+
+			const renderer = (view.previewMode as unknown as { renderer?: PreviewRenderer }).renderer;
+			if (!renderer?.sections || typeof renderer.queueRender !== "function") return;
+
+			for (const section of renderer.sections) section.resetCompute?.();
+			renderer.queueRender();
+		});
+	}
+
+	// "3 of 120" in the bar, counted over the whole file rather than what is mounted
+	private async updateSearchCount(file: TFile) {
+		const bar = this.searchBar;
+		if (!bar) return;
+
+		const query = this.getChatNote(file).searchQuery;
+		if (!query) {
+			bar.count.setText("");
+			return;
+		}
+
+		const context = await this.getArchiveContext(file);
+		// the bar may have moved on, or the query changed, while the context was loading
+		if (this.searchFile !== file || this.getChatNote(file).searchQuery !== query) return;
+
+		let matches = 0;
+		for (const { message } of context.messageMap.values()) {
+			if (messageMatches(message, query)) matches += 1;
+		}
+		bar.count.setText(`${String(matches)} of ${String(context.messageMap.size)}`);
+	}
+
 	async scrollToMessage(file: TFile, msgId: string, options?: {
 		behavior?: ScrollBehavior;
 		block?: ScrollLogicalPosition;
@@ -1144,6 +1374,19 @@ export default class ChatNotesPlugin extends Plugin {
 			   couldn't be mounted, and must stay silent rather than claim it was deleted. */
 			if (!entry) {
 				new Notice("That message is no longer in the file");
+				return false;
+			}
+
+			/* A message a filter hides never mounts - collapsed in Live Preview, display:none in
+			   Reading View - so the jump below would move the reader to its line and then wait
+			   out the timeout for nothing. Said instead, without moving them. */
+			const filter = this.getMessageFilter(file);
+			if (filter && isFilteredOut(entry.message, filter)) {
+				// named after the filter that actually hides it, when both are on
+				const byPin = filter.pinnedOnly && entry.message.header.extra.pinned !== "true";
+				new Notice(byPin
+					? "That message is hidden by the pinned messages filter"
+					: "That message is hidden by the current search");
 				return false;
 			}
 
@@ -1447,6 +1690,9 @@ export default class ChatNotesPlugin extends Plugin {
 	async applyConfigToFile(file: TFile){
 
 		const config = this.getConfigCache(file);
+		// every caller records what it applied as lastAppliedConfig afterwards, so until then
+		// this is the config the containers are still showing
+		const previous = this.getChatNote(file).lastAppliedConfig;
 		const context = await this.getArchiveContext(file);
 
 		// before the container check on purpose: the context still needs the new config
@@ -1467,12 +1713,24 @@ export default class ChatNotesPlugin extends Plugin {
 		// re-asserted after a render or a config change, without animating - nothing moved from
 		// the reader's point of view
 		this.applyPinFilter(file);
+		this.applySearchFilter(file);
 
 		// the author badge setting widens the gutter the input's geometry derives from;
 		// the ResizeObserver won't fire for it, since contentEl itself doesn't resize
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view?.file?.path === file.path) {
 			this.updateChatInputPosition(view);
+		}
+
+		// the badges and their insets follow the config, but only re-place themselves on scroll
+		refreshSticky();
+
+		/* The wider gutter re-wraps every bubble, so Reading View's stored heights for the
+		   off-screen messages are wrong after it (see remeasureReadingViews). The one setting
+		   that changes a message's height without a rerender - and only on an actual change,
+		   since colour pickers and sliders come through here on every drag tick. */
+		if (previous && previous.showAuthorBadges !== config.showAuthorBadges) {
+			this.remeasureReadingViews(file);
 		}
 	}
 
@@ -1568,6 +1826,11 @@ export default class ChatNotesPlugin extends Plugin {
 		// mounted ones pick this up from the processor
 		this.applyPerMessageStyles(file, context);
 		this.applyPinFilter(file);
+		this.applySearchFilter(file);
+
+		// a sent, edited, pinned or deleted message can change what is hidden, and the count
+		if (this.getMessageFilter(file)) this.filterExtension.refresh(file);
+		if (this.getChatNote(file).searchQuery) void this.updateSearchCount(file);
 	}
 
 	async getArchiveContext(file: TFile): Promise<ArchiveContext> {

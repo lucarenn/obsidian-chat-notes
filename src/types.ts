@@ -2,6 +2,7 @@ import { MarkdownPostProcessorContext, FrontMatterCache, TFile} from "obsidian";
 import { ChatConfig, DefaultAuthorMode } from "./settings";
 import { isNumericId, compareNumericIds, incrementNumericId } from "./util";
 import type { ReactionChange } from "./reactions";
+import type { SearchQuery } from "./search";
 import ChatNotesPlugin from "./main";
 
 
@@ -125,6 +126,7 @@ export type CreateHTMLParams = {
 	onReactionPicker: (msgId: string, anchor: HTMLElement) => void;
 	onReplyToggle: (msgId: string) => void;
 	syncReplyTarget: (row: HTMLElement, msgId: string) => void;
+	syncSearch: (row: HTMLElement, msg: Message) => void;
 	// `origin` is the row the banner was clicked in - the target is resolved in that same
 	// pane, never in a hidden subview or another leaf (see scrollToMessage)
 	onScrollToReply: (targetId: string, origin: HTMLElement) => void;
@@ -261,6 +263,10 @@ export class ChatNote {
 
 		public replyTo?: string,	// id of the message the next sent message will reply to
 		public pinFilter?: boolean,	// showing pinned messages only
+
+		public searchOpen?: boolean,	// the search bar is shown for this file
+		public searchText?: string,	// what the search field holds, restored on file switch
+		public searchQuery?: SearchQuery,	// the filter in effect; unset = none
 
 	) {}
 

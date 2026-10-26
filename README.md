@@ -69,6 +69,22 @@ reactions: 👍 3, ❤️, 🎉 2
 Each entry is an emoji with an optional count (1 when left out). Entries that don't follow this
 format are ignored, and are removed from the line the next time a reaction is added or removed.
 
+## Searching
+
+Select the search icon in the note's header (next to the scroll and pin buttons), or run the
+**Search messages** command, to open a search bar at the top of the chat. Messages that don't
+contain the search text are hidden, the same way **Show pinned messages** hides unpinned ones,
+and the bar shows how many messages match. The search ignores case and looks at the message
+text, the author, the time and the reactions. It runs once you stop typing for a moment, or
+right away when you press `Enter`.
+
+Close the bar with `Esc` or its **×** button to show all messages again. The search is kept per
+note, so it is still there when you come back to it, and it can be combined with the pinned
+filter.
+
+Unlike Obsidian's own search, this doesn't put the cursor inside a message, so messages keep
+their formatting while you search.
+
 ## Shortcuts
 
 These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cmd` on macOS.
@@ -79,6 +95,8 @@ These work while the chat input has focus. `Mod` is `Ctrl` on Windows/Linux, `Cm
 | `Mod` + `↑` | Message input | Open the author/time row |
 | `Mod` + `↑` | Author or time field | Close the row, back to the input |
 | `Esc` | Author or time field | Close the row, back to the input |
+| `Enter` | Search field | Search now, without waiting |
+| `Esc` | Search field | Close the search and show all messages |
 
 ## Commands
 
@@ -91,6 +109,7 @@ You can use these to speed up your workflow by setting a hotkey for them:
 | Focus chat input |
 | Scroll to bottom |
 | Scroll to top |
+| Search messages |
 | Add override properties |
 | Recalculate message ids |
 
@@ -187,6 +206,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, Markdown message editing/writing, custom search and better plugin compatibility in the future.
+I might implement additions like virtualized rendering, Markdown message editing/writing, more search filters and better plugin compatibility in the future.
 
 > The plugin has not been tested on mobile.

@@ -103,6 +103,12 @@
     display: none !important;
 }
 
+/* Search filter: the same split, but data-search-match changes with every query, so main.ts
+   keeps it current (see syncRowSearch). Independent of the pin rule, so the two combine. */
+.msg-search-active .chat-message-row[data-search-match="false"] {
+    display: none !important;
+}
+
 /* A pinned message is the same bubble in a different colour, so it swaps the two properties the
    whole row is built from rather than restating the rules that consume them - bubble, tail,
    badge and action icons all follow. Redefined on the ROW, not on .chat-message: the tail is a
@@ -969,4 +975,63 @@
 .msg-emoji-picker-item:hover,
 .msg-emoji-picker-item:focus-visible {
     background-color: var(--background-modifier-hover) !important;
+}
+
+/* --------------------------------*/
+/* SEARCH */
+/* --------------------------------*/
+
+/* Floats over the top of the content area the way the chat input floats over the bottom,
+   and takes its width and left from it (see updateChatInputPosition). */
+.chat-search-bar {
+    position: absolute;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    margin-top: 1%;
+    padding: var(--chat-input-pad-y) var(--chat-input-pad-x);
+
+    background: var(--background-primary);
+    box-shadow: 0 0 0 var(--chat-input-border-width) var(--settings-msg-border-color, #444444);
+    border-radius: var(--chat-input-radius);
+}
+
+.chat-search-icon {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.chat-search-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-search-count {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+}
+
+.chat-search-close-btn {
+    flex-shrink: 0;
+    padding: 4px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.chat-search-close-btn:hover {
+    color: var(--text-normal);
+}
+
+/* clearance for the search bar, so the first message isn't hidden under it */
+.chat-note-view.chat-search-open .cm-contentContainer,
+.chat-note-view.chat-search-open .markdown-preview-sizer {
+    padding-top: 64px;
 }
