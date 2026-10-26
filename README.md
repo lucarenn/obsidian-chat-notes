@@ -73,7 +73,7 @@ format are ignored, and are removed from the line the next time a reaction is ad
 ## Searching
 
 Select the search icon in the note's header (next to the scroll and pin buttons), or run the
-**Search messages** command, to open a search bar at the top of the chat. This will filter the messages and hide messages that do not match your query. You can search for message content, author, time and reactions (case insensitive).Obsidian's default search with `Ctrl + F` will jump into the message code blocks and breaks formatting, so this is better to use. You can override `Ctrl + F` or set a new hotkey for the command in the seetings.
+**Search messages** command, to open a search bar at the top of the chat. This will filter the messages and hide messages that do not match your query. You can search for message content, author, time and reactions (case insensitive). Obsidian's default search with `Ctrl + F` will jump into the message code blocks and breaks formatting, so this is better to use. You can override `Ctrl + F` or set a new hotkey for the command in the seetings.
 
 ### Search filters
 
@@ -108,8 +108,6 @@ Close the bar with `Esc` or its **×** button to show all messages again. The se
 note, so it is still there when you come back to it, and it can be combined with the pinned
 filter.
 
-Unlike Obsidian's own search, this doesn't put the cursor inside a message, so messages keep
-their formatting while you search.
 
 ## Shortcuts
 
