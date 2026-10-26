@@ -1645,6 +1645,9 @@ export default class ChatNotesPlugin extends Plugin {
 		// widens the gutter via --msg-reply-gutter and reveals the badges every row carries
 		container.classList.toggle("msg-show-author-badges", config.showAuthorBadges === true);
 
+		// headings in messages take the bubble's contrast pick instead of the theme's colours
+		container.classList.toggle("msg-contrast-headings", config.contrastHeadings === true);
+
 		if (config.messageFlashColor){
 			container.style.setProperty(
 				"--settings-msg-flash-color",

@@ -275,7 +275,15 @@ fixed delay: Reading View runs the codeblock processor for sections ahead of the
 inserts them only as they scroll near, so a message further down can sit detached for as long
 as the reader takes to get there. A single-frame wait would register only the rows near the view.
 
-Positions are only recomputed on scroll and resize, and a hidden element (badges switched off)
+That event only fires after the row's first paint, though, so a re-rendered row (every reaction,
+edit or pin rewrites the file) would show its badge at the row's top for a frame. Each row is
+therefore also watched by one shared `ResizeObserver`, whose first record arrives after layout but
+before paint: the row registers and places its badge there, and later records re-place it when
+the row's height changes. That observer is the main window's — it is built before the row's
+window is known — so in a popout it stays silent and `onNodeInserted` registers the row instead,
+with the one-frame flicker.
+
+Positions are otherwise only recomputed on scroll and resize, and a hidden element (badges switched off)
 is skipped, so it keeps its last offset. Anything that moves the elements without scrolling has
 to call `refreshSticky()`. `applyConfigToFile` does, which is what places the badges correctly the
 moment they are switched back on, and after a corner radius change.
@@ -544,6 +552,19 @@ time they fire.
 background, the bottom padding that clears the chat input, embed spacing — unscoped, these
 apply to every note in the vault, in every vault that merely has the plugin installed. Rules
 that only touch the plugin's own classes need no such scope.
+
+**No `!important` in `styles.css`; native buttons win on specificity instead.** The community
+directory's review flags every `!important`. Obsidian styles every `<button>` (fill, shadow,
+padding), and its strongest rules are `button:not(.clickable-icon)` and `button:hover` at
+(0,1,1), which a single class (0,1,0) loses to. So each button rule is scoped under a parent class
+(`.msg-reaction-bar .msg-reaction`, `.chat-search-bar .chat-search-close-btn`, …) for (0,2,0),
+and plugin CSS loads after `app.css`. Its `:hover` / `:focus-visible` rules need the same prefix,
+or the scoped base rule outranks them. Each base rule also lists its own `:active` state, at
+(0,3,0), because themes restyle pressed buttons (Primary's `button:not(button.clickable-icon):active`
+is (0,2,2)). Icon boxes stay square: themes that replace icons with a CSS mask, as Primary does,
+leave `mask-repeat` at its default, so a non-square box shows a sliver of a repeated icon.
+Known trade-off: a theme with heavier button selectors can now repaint these buttons, where the
+old flags beat it.
 
 **CSS variables are prefixed `--chat-input-*`, not `--input-*`** — Obsidian's own theme
 defines `--input-radius` / `--input-border-width` globally, and reusing those names reskins

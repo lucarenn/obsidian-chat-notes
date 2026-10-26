@@ -23,6 +23,7 @@ export interface ChatConfig {
 	messageFlashColor?: string;
 	messageReplyColor?: string;
 	messageBorderColor?: string;
+	contrastHeadings?: boolean;
 	// add future settings (that can be overriden in yaml) here
 }
 
@@ -39,6 +40,7 @@ export interface ChatNotesPluginSettings extends ChatConfig {
 	messageFlashColor: string;
 	messageReplyColor: string;
 	messageBorderColor: string;
+	contrastHeadings: boolean;
 	inputMaxHeight: number;
 	inputWidthOffset: number;
 	defaultAuthorMode: DefaultAuthorMode;
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: ChatNotesPluginSettings = {
 	messageFlashColor: "#eff2f3",
 	messageReplyColor: "#e1e1ec",
 	messageBorderColor: "#444444",
+	contrastHeadings: false,
 	inputMaxHeight: 200,
 	inputWidthOffset: 0,
 	defaultAuthorMode: "owner",
@@ -141,6 +144,11 @@ export class ChatNotesSettingTab extends PluginSettingTab {
 				name: "Show author badges",
 				desc: "Give each message a speech-bubble tail with the author's avatar and name beside it, in the gutter - on the right for the chat owner (the file's 'author' YAML key) and on the left for everyone else; widens the gutter slightly while on; override per file with 'msgAuthorBadges: true' or 'msgAuthorBadges: false'.",
 				control: { type: "toggle", key: "showAuthorBadges" },
+			},
+			{
+				name: "Match headings to message text",
+				desc: "Color headings inside messages like the message text, so they stay readable on any bubble color. Off keeps your theme's heading colors; override per file with 'msgContrastHeadings: true' or 'msgContrastHeadings: false'.",
+				control: { type: "toggle", key: "contrastHeadings" },
 			},
 			{
 				name: "Message corner radius",
@@ -267,6 +275,7 @@ export const OVERRIDE_KEYS = [
 	"msgShowAuthor",
 	"msgShowTime",
 	"msgAuthorBadges",
+	"msgContrastHeadings",
 	"msgButtonShadow",
 	"msgScrollOnSend",
 	"msgDefaultAuthor"
@@ -298,6 +307,7 @@ export function getFileOverrides(app: App, file: TFile): ChatConfig {
 		showMessageAuthor: parseBooleanOverride(fm.msgShowAuthor),
 		showMessageTimestamp: parseBooleanOverride(fm.msgShowTime),
 		showAuthorBadges: parseBooleanOverride(fm.msgAuthorBadges),
+		contrastHeadings: parseBooleanOverride(fm.msgContrastHeadings),
 		scrollOnSend: parseBooleanOverride(fm.msgScrollOnSend),
 		enableButtonShadow: parseBooleanOverride(fm.msgButtonShadow)
 	};

@@ -58,6 +58,10 @@
     display: block;
     position: relative;
 
+    /* the theme's text colour, kept before .message-content overrides --text-normal with the
+       bubble's contrast pick - for controls inside the body that keep the theme's own fill */
+    --chat-theme-text-normal: var(--text-normal);
+
     padding-top: var(--msg-pad-top);
     padding-bottom: 10px;
     padding-left: var(--msg-pad-x);
@@ -67,13 +71,13 @@
     margin-bottom: 10px;
     margin-left: var(--msg-reply-gutter);
     margin-right: var(--msg-reply-gutter);
-    border-radius:  var(--settings-msg-corner-radius, 12px) !important;
+    border-radius: var(--settings-msg-corner-radius, 12px);
     max-width: 100%;
-    background-color: var(--settings-msg-bg-color, #6d54b1) !important;
+    background-color: var(--settings-msg-bg-color, #6d54b1);
 
     /* box-shadow, not border: overflow:hidden clips this element's children but never its
        own border, so a real border would stay visible as a ring behind the reply banner */
-    box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #444444) !important;
+    box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #444444);
 
     /* no will-change here: it makes every bubble its own layer, which Canvas then scales
        instead of re-rasterizing (blurry text). To animate a bubble, set it from JS around the
@@ -100,13 +104,13 @@
    from render (see createElementsHTML). Hides the row, so the bubble's siblings (reply button,
    author badge) go with it instead of floating beside an invisible message. */
 .msg-pinned-only .chat-message-row:not([data-pinned="true"]) {
-    display: none !important;
+    display: none;
 }
 
 /* Search filter: the same split, but data-search-match changes with every query, so main.ts
    keeps it current (see syncRowSearch). Independent of the pin rule, so the two combine. */
 .msg-search-active .chat-message-row[data-search-match="false"] {
-    display: none !important;
+    display: none;
 }
 
 /* A pinned message is the same bubble in a different colour, so it swaps the two properties the
@@ -118,14 +122,6 @@
 .chat-message-row[data-pinned="true"] {
     --settings-msg-bg-color: var(--settings-msg-pin-color, #ec4e52);
     --settings-msg-text-color: var(--settings-msg-pin-text-color, #f5f5f5);
-}
-
-.markdown-reading-view .chat-message
-{
-    background-color: var(--settings-msg-bg-color, #6d54b1) !important;
-}
-.markdown-source-view.mod-cm6 .chat-message {
-    background-color: var(--settings-msg-bg-color, #6d54b1) !important;
 }
 
 /* A rule that reaches Obsidian's OWN note elements - rather than one of this plugin's classes -
@@ -141,8 +137,8 @@
 /* Give embed blocks the same spacing in Live Preview as in Reading view */
 .chat-note-view .cm-editor .embed,
 .chat-note-view .cm-editor .block-language-img-gallery {
-    margin-top: 15px !important;
-    margin-bottom: 15px !important;
+    margin-top: 15px;
+    margin-bottom: 15px;
 }
 
 .message-content {
@@ -165,6 +161,17 @@
     --text-muted: color-mix(in srgb, var(--settings-msg-text-color, #f5f5f5) 72%, transparent);
     --text-faint: color-mix(in srgb, var(--settings-msg-text-color, #f5f5f5) 45%, transparent);
     --list-marker-color: color-mix(in srgb, var(--settings-msg-text-color, #f5f5f5) 72%, transparent);
+}
+
+/* Opt-in (contrastHeadings): a theme that gives headings their own fixed colours instead of
+   deriving them from --text-normal (Primary does) bypasses the override above */
+.msg-contrast-headings .message-content {
+    --h1-color: var(--settings-msg-text-color, #f5f5f5);
+    --h2-color: var(--settings-msg-text-color, #f5f5f5);
+    --h3-color: var(--settings-msg-text-color, #f5f5f5);
+    --h4-color: var(--settings-msg-text-color, #f5f5f5);
+    --h5-color: var(--settings-msg-text-color, #f5f5f5);
+    --h6-color: var(--settings-msg-text-color, #f5f5f5);
 }
 
 /* prevents overflow inside codeblocks */
@@ -243,13 +250,19 @@
 }
 
 /* black or white, picked in applyStyles against whichever background this bubble uses - the
-   pinned rule above swaps both properties together, so this follows a pinned bubble too */
-.msg-author {
-    background: transparent !important;
-    box-shadow: none !important;
+   pinned rule above swaps both properties together, so this follows a pinned bubble too.
+   Scoped under a parent class so it outranks Obsidian's own button rules, up to
+   `button:not(.clickable-icon)` and `button:hover` at (0,1,1), with no priority flag - every
+   native <button> below uses the same pattern. Each also lists its :active state, at (0,3,0):
+   themes restyle pressed buttons too (Primary's `button:not(button.clickable-icon):active` is
+   (0,2,2)), and the press would otherwise swap in their fill, padding and shadow */
+.msg-header-meta .msg-author,
+.msg-header-meta .msg-author:active {
+    background: transparent;
+    box-shadow: none;
     padding: 0;
     margin: 0;
-    color: var(--settings-msg-text-color, #f5f5f5) !important;
+    color: var(--settings-msg-text-color, #f5f5f5);
 }
 
 .msg-timestamp {
@@ -287,11 +300,11 @@
 
 /* painted in the bubble's own color, so the icons take the same contrast pick as
    .msg-author - lucide glyphs stroke in currentColor, so `color` carries into the svg */
-.msg-action-btn {
+.msg-action-menu .msg-action-btn,
+.msg-action-menu .msg-action-btn:active {
     border: none;
-    background-color: var(--settings-msg-bg-color, #6d54b1) !important;
-    background: var(--background-modifier-hover);
-    color: var(--settings-msg-text-color, #f5f5f5) !important;
+    background-color: var(--settings-msg-bg-color, #6d54b1);
+    color: var(--settings-msg-text-color, #f5f5f5);
     border-radius: 4px;
     padding: 0px 6px;
     cursor: pointer;
@@ -299,13 +312,16 @@
 }
 
 /* turn off shadow via settings*/
-.menu-btn-no-shadow .msg-action-btn {
-	box-shadow: none !important;
+.menu-btn-no-shadow .msg-action-btn,
+.menu-btn-no-shadow .msg-action-btn:active {
+	box-shadow: none;
 }
 
 /* Button Size */
+/* square: themes that swap icons for a CSS mask (Primary) don't set mask-repeat, so a
+   non-square box shows a sliver of a repeated icon beside the real one */
 .msg-action-btn svg {
-    width: 16px;
+    width: 14px;
     height: 14px;
 }
 
@@ -330,7 +346,7 @@
     width: 100%;
     min-height: 52px; 
     max-height: 320px; 
-    resize: none !important;
+    resize: none;
     overflow-y: auto;
 
     border: none;
@@ -349,7 +365,9 @@
     background: color-mix(in srgb, var(--settings-msg-bg-color, #6d54b1) 82%, black);
 }
 
-.msg-inline-editor:hover {
+/* scoped: Obsidian's `textarea:not(:disabled):hover` is (0,2,1) and would swap in its own
+   form-field background under the bubble's text colour */
+.msg-editor-wrapper .msg-inline-editor:hover {
     outline: none;
     box-shadow: none;
     background: color-mix(in srgb, color-mix(in srgb, var(--settings-msg-bg-color, #6d54b1) 82%, black) 70%, var(--settings-msg-bg-color, #6d54b1));
@@ -367,8 +385,11 @@
     gap: 6px;
 }
 
+/* Save/Cancel keep Obsidian's button fill, so they take the theme's text colour back rather
+   than the bubble's (see --chat-theme-text-normal on .chat-message) */
 .msg-editor-wrapper .msg-btn {
     align-self: flex-end;
+    color: var(--chat-theme-text-normal);
 }
 
 /* --------------------------------*/
@@ -416,7 +437,8 @@
     flex-direction: column;
 }
 
-.chat-input-expander {
+.chat-input-header-area .chat-input-expander,
+.chat-input-header-area .chat-input-expander:active {
     width: 100%;
     height: 12px;
     min-height: 0;
@@ -427,10 +449,9 @@
     align-items: center;
     justify-content: center;
 
-    /* !important throughout: Obsidian's theme styles every native <button> by default */
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
+    background: transparent;
+    border: none;
+    box-shadow: none;
     cursor: pointer;
 
     color: var(--text-faint);
@@ -440,7 +461,7 @@
     transition: color 120ms ease;
 }
 
-.chat-input-expander:hover,
+.chat-input-header-area .chat-input-expander:hover,
 .chat-input-header-area.is-pinned .chat-input-expander {
     color: var(--text-muted);
 }
@@ -545,7 +566,8 @@
 /* Hover button, spanning the row's full height within the reserved gutter, so the bubble's
    own width/position never changes on hover. No border/fill of its own - just a gradient
    fading out to the right. */
-.msg-reply-btn {
+.chat-message-row .msg-reply-btn,
+.chat-message-row .msg-reply-btn:active {
     position: absolute;
     top: 0;
     right: 0;
@@ -558,12 +580,12 @@
     justify-content: center;
     padding: 0;
 
-    border: none !important;
-    box-shadow: none !important;
+    border: none;
+    box-shadow: none;
     background: linear-gradient(to right,
         rgba(127, 127, 127, 0.20) 0%,
         rgba(127, 127, 127, 0.10) 30%,
-        transparent 82%) !important;
+        transparent 82%);
 
     cursor: pointer;
 
@@ -574,8 +596,8 @@
     transition: opacity 120ms ease;
 }
 
-.msg-reply-btn:hover {
-    box-shadow: inset 0 0.5px 0.5px 0.5px rgba(255, 255, 255, 0.09), 0 2px 4px 0 rgba(0, 0, 0, 0.15), 0 1px 1.5px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.2), 0 0 0 0 transparent !important;
+.chat-message-row .msg-reply-btn:hover {
+    box-shadow: inset 0 0.5px 0.5px 0.5px rgba(255, 255, 255, 0.09), 0 2px 4px 0 rgba(0, 0, 0, 0.15), 0 1px 1.5px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.2), 0 0 0 0 transparent;
 }
 
 /* vertical position driven by JS, not CSS position:sticky - see sticky.ts for why.
@@ -878,29 +900,30 @@
 }
 
 /* inherits the row's colours, so a pinned message's pills follow the pin colour */
-.msg-reaction {
+.msg-reaction-bar .msg-reaction,
+.msg-reaction-bar .msg-reaction:active {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     height: var(--msg-reaction-height);
-    padding: 0 8px !important;
+    padding: 0 8px;
 
     border: none;
-    border-radius: calc(var(--msg-reaction-height) / 2) !important;
-    background-color: var(--settings-msg-bg-color, #6d54b1) !important;
-    box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #444444) !important;
-    color: var(--settings-msg-text-color, #f5f5f5) !important;
+    border-radius: calc(var(--msg-reaction-height) / 2);
+    background-color: var(--settings-msg-bg-color, #6d54b1);
+    box-shadow: 0 0 0 var(--msg-border-width) var(--settings-msg-border-color, #444444);
+    color: var(--settings-msg-text-color, #f5f5f5);
 
     font-size: 0.85em;
     line-height: 1;
     cursor: pointer;
 }
 
-.msg-reaction:hover {
+.msg-reaction-bar .msg-reaction:hover {
     background-image: linear-gradient(
         color-mix(in srgb, currentColor 15%, transparent),
         color-mix(in srgb, currentColor 15%, transparent)
-    ) !important;
+    );
 }
 
 .msg-reaction-count {
@@ -956,25 +979,26 @@
     grid-template-columns: repeat(8, 1fr);
 }
 
-.msg-emoji-picker-item {
+.msg-emoji-picker .msg-emoji-picker-item,
+.msg-emoji-picker .msg-emoji-picker-item:active {
     display: flex;
     align-items: center;
     justify-content: center;
     height: 32px;
-    padding: 0 !important;
+    padding: 0;
 
     border: none;
-    background: transparent !important;
-    box-shadow: none !important;
+    background: transparent;
+    box-shadow: none;
     border-radius: var(--radius-s);
 
     font-size: 18px;
     cursor: pointer;
 }
 
-.msg-emoji-picker-item:hover,
-.msg-emoji-picker-item:focus-visible {
-    background-color: var(--background-modifier-hover) !important;
+.msg-emoji-picker .msg-emoji-picker-item:hover,
+.msg-emoji-picker .msg-emoji-picker-item:focus-visible {
+    background-color: var(--background-modifier-hover);
 }
 
 /* --------------------------------*/
@@ -1026,18 +1050,20 @@
     font-variant-numeric: tabular-nums;
 }
 
-.chat-search-emoji-btn,
-.chat-search-close-btn {
+.chat-search-bar .chat-search-emoji-btn,
+.chat-search-bar .chat-search-close-btn,
+.chat-search-bar .chat-search-emoji-btn:active,
+.chat-search-bar .chat-search-close-btn:active {
     flex-shrink: 0;
-    padding: 4px !important;
-    background: transparent !important;
-    box-shadow: none !important;
+    padding: 4px;
+    background: transparent;
+    box-shadow: none;
     color: var(--text-muted);
     cursor: pointer;
 }
 
-.chat-search-emoji-btn:hover,
-.chat-search-close-btn:hover {
+.chat-search-bar .chat-search-emoji-btn:hover,
+.chat-search-bar .chat-search-close-btn:hover {
     color: var(--text-normal);
 }
 

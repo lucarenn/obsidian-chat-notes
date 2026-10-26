@@ -206,11 +206,10 @@ export function registerSticky(
 	let scroller: Element | null = null;
 	let entry: StickyEntry | null = null;
 
-	/* Deferred until the row is in the page, since closest() needs its scroller. That can be
-	   much later than the render: Reading View renders sections ahead of the viewport and only
-	   inserts them as they scroll near. Hooked on the row rather than the badge, which is
-	   display:none while badges are off and would never report its insertion. */
-	const stopWaiting = row.onNodeInserted(() => {
+	// joins the row's scroller group and places the element straight away; the observer's
+	// first record drops it from `visible` again if the row is off screen
+	const register = () => {
+		if (entry) return;
 		scroller = row.closest(".cm-scroller, .markdown-preview-view");
 		if (!scroller) return;
 
@@ -218,17 +217,55 @@ export function registerSticky(
 		entry = { row, target, insets, onVisible };
 
 		group.entries.set(row, entry);
-		// observing fires an immediate record, which places the element without waiting
-		// for the reader to scroll
 		group.observer.observe(row);
-	}, true);
+		group.visible.add(entry);
+		updateEntry(entry, scroller.getBoundingClientRect());
+	};
+
+	/* Deferred until the row is in the page, since closest() needs its scroller. That can be
+	   much later than the render: Reading View renders sections ahead of the viewport and only
+	   inserts them as they scroll near. Hooked on the row rather than the badge, which is
+	   display:none while badges are off and would never report its insertion. */
+	const stopWaiting = row.onNodeInserted(register, true);
+
+	/* The insertion event only fires after the row's first paint, so a re-rendered row (say
+	   after adding a reaction) would show its element at the row's top for a frame. A resize
+	   record arrives after layout but before paint, both for the first layout and for later
+	   height changes. The insertion hook stays as the fallback for popout windows: the observer
+	   is built before the row's window is known, so it is the main window's and never reports
+	   rows in a popout. */
+	observeRowResize(row, () => {
+		if (!entry) {
+			register();
+		} else if (scroller && groups.get(scroller)?.visible.has(entry)) {
+			updateEntry(entry, scroller.getBoundingClientRect());
+		}
+	});
 
 	// ties the entry's life to the rendered message: a re-render, file switch or closed
 	// leaf all unload the child, which is the only signal that the row is gone
 	const child = new MarkdownRenderChild(target);
 	child.onunload = () => {
 		stopWaiting();
+		unobserveRowResize(row);
 		if (scroller && entry) unregister(scroller, entry);
 	};
 	ctx.addChild(child);
+}
+
+// one observer for every tracked row, created on first use
+let resizeObserver: ResizeObserver | null = null;
+const resizeHandlers = new Map<Element, () => void>();
+
+function observeRowResize(row: HTMLElement, onResize: () => void) {
+	resizeObserver ??= new ResizeObserver((records) => {
+		for (const record of records) resizeHandlers.get(record.target)?.();
+	});
+	resizeHandlers.set(row, onResize);
+	resizeObserver.observe(row);
+}
+
+function unobserveRowResize(row: HTMLElement) {
+	resizeHandlers.delete(row);
+	resizeObserver?.unobserve(row);
 }

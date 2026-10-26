@@ -208,6 +208,7 @@ A few things to know:
 | `msgShowAuthor` | `true` / `false` | Show message author |
 | `msgShowTime` | `true` / `false` | Show message time |
 | `msgAuthorBadges` | `true` / `false` | Show author badges |
+| `msgContrastHeadings` | `true` / `false` | Match headings to message text |
 | `msgButtonShadow` | `true` / `false` | Enable button shadow |
 | `msgScrollOnSend` | `true` / `false` | Scroll to bottom on send |
 | `msgDefaultAuthor` | `owner` / `previous` | Default message author |
