@@ -68,7 +68,7 @@ destructive, not the ones whose bugs are visible on screen.
 | `tests/numeric-ids.test.ts` | `compareNumericIds` / `incrementNumericId` at 19-digit snowflake length |
 | `tests/renumber.test.ts` | `renumberMessageIds` — the 1..N rewrite, `reply_to` remapping, duplicates |
 | `tests/reactions.test.ts` | Reaction parsing/serialising, add/remove, `setHeaderField` |
-| `tests/search.test.ts` | `parseSearchQuery` / `messageMatches` — which fields a search looks at |
+| `tests/search.test.ts` | `parseSearchQuery` / `messageMatches` (text and `key:value` filters), the date parsing, the field's suggestions |
 | `tests/fixtures.ts` | `block()` / `note()` builders for chat-note text |
 
 Two things to know before adding to them:
@@ -95,8 +95,9 @@ Two things to know before adding to them:
 | `util.ts` | File-format parsing, header patching (`setHeaderField`), id arithmetic, timestamps, colour contrast, scrolling helpers |
 | `reactions.ts` | The `reactions` header format and its add/remove operations (pure) |
 | `emoji-picker.ts` / `emoji-data.ts` | The reaction picker popover and its bundled emoji set |
-| `search.ts` | The search query and which messages it matches (pure) |
-| `search-bar.ts` | The search bar: field, match count, debounce, keymap scope |
+| `search.ts` | The search query, its `key:value` filters, which messages it matches, what the field suggests (pure) |
+| `search-dates.ts` | Date values for the filters and reading a message's timestamp (pure) |
+| `search-bar.ts` | The search bar: field, filter suggestions popover, match count, debounce, keymap scope |
 | `filter-extension.ts` | CodeMirror field that collapses filtered-out messages in Live Preview |
 | `sticky.ts` | Manual `position: sticky` for gutter elements (see quirks) |
 | `modals.ts` | Delete-confirmation modal |
@@ -468,16 +469,44 @@ screen from stored or estimated heights, not from the DOM.
   re-wraps every bubble), so `applyConfigToFile` re-measures when that value changes. Anything
   new that alters row height through a container class or variable needs the same.
 
-`search.ts` holds what a query *is* and what it matches, and nothing else knows. More conditions
-(dates, "has reactions") become fields on `SearchQuery`, parsed in `parseSearchQuery` and ANDed in
-`messageMatches`. The bar is one element moved between views like the chat input, but it tracks
+`search.ts` holds what a query *is* and what it matches, and nothing else knows. A query is
+Discord-style `key:value` filters plus whatever free text is left: `SEARCH_FILTERS` lists the
+names (the first is the one suggested, the rest are aliases), `parseSearchQuery` takes them out
+of the text into fields on `SearchQuery`, and `messageMatches` ANDs them. A new filter is an entry
+there, a field, a `case` in each, and its values in `searchSuggestions`. Three decisions in it
+that are easy to undo by accident:
+
+- **A name that isn't a filter stays text**, so `https://…` and `14:33` still search as typed.
+- **A filter with no value yet is no condition**, and a query of only those is `null`, so typing
+  `author:` doesn't hide the whole note for a moment before the name arrives.
+- **Dates resolve to a span**, not an instant (`parseDateValue`: a day, a month, a year, a
+  minute), which is what lets `before:`/`after:` leave out the period they name, as Discord's do,
+  and lets `time:` match a day whatever zero-padding the timestamp has. Relative values (`7d`)
+  are resolved against `now` *at parse time*; the query is re-parsed whenever the text changes,
+  so a search left open for hours keeps its original cut-off. `now` is a parameter for the tests.
+
+The suggestions are an `AbstractInputSuggest` over the field. `searchSuggestions` is the pure
+half: filter names for the word at the caret, then that filter's values. It offers nothing on a
+blank word unless the whole field is blank — the popover's scope takes `Enter`, so suggesting
+after `deploy␣` would turn Enter into a pick instead of a search. Selection uses `onSelect`
+(1.4.10), not an overridden `selectSuggestion` (public only from 1.6.6), and re-fires `input` in a
+microtask so the value suggestions open after the popover has closed itself. The bar is one element moved between views like the chat input, but it tracks
 its own `searchFile` rather than `currentFile`, since a background pane's search button opens it
 there. Its debounce is flushed when the bar moves to another file, so text typed for one note
 never lands on the next.
 
 The emoji picker is attached to the anchor's own `doc.body` with `position: fixed`, for the same
 clipping reason and so it works in popout windows. Only one is open at a time; it closes with
-its action menu (`closeMenu`), on a pick, Escape, an outside press, a scroll or a resize.
+its action menu (`closeMenu`), on a pick, Escape, an outside press, a scroll or a resize. The
+search bar's emoji button opens the same picker (`toggleSearchEmojiPicker`) and types the pick at
+the field's caret; it is closed when the bar moves to another file, so a late pick can't land there.
+
+**Emoji have names.** `emoji-data.ts` pairs every listed emoji with its Discord name, which is what
+a Discord export stores (`:fire:`) and what people type. `emojiName` / `emojiByName` map between
+the two, ignoring the variation selector. Reactions stay stored however they were added; the
+mapping is read-side only, so `reaction:` finds 🔥 and `:fire:` either way (`reactionTerms` in
+`search.ts`) and the picker's field filters the grid by name. An exact name means that one emoji,
+so `reaction:heart` doesn't also find 😍; a partial one matches any name containing it.
 
 **Text contrast is computed.** The bubble colour is arbitrary user input, so
 `getReadableTextColor` picks black or white and exposes it as `--settings-msg-text-color`,

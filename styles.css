@@ -1010,6 +1010,13 @@
     min-width: 0;
 }
 
+/* hidden until a filter's value is ignored (see updateSearchCount) */
+.chat-search-warning {
+    display: none;
+    flex-shrink: 0;
+    color: var(--text-warning);
+}
+
 .chat-search-count {
     flex-shrink: 0;
     color: var(--text-muted);
@@ -1017,6 +1024,7 @@
     font-variant-numeric: tabular-nums;
 }
 
+.chat-search-emoji-btn,
 .chat-search-close-btn {
     flex-shrink: 0;
     padding: 4px !important;
@@ -1026,8 +1034,22 @@
     cursor: pointer;
 }
 
+.chat-search-emoji-btn:hover,
 .chat-search-close-btn:hover {
     color: var(--text-normal);
+}
+
+/* a row of the filter suggestions popover: the filter or value, then what it does */
+.chat-search-suggestion {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.chat-search-suggestion-hint {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
 }
 
 /* clearance for the search bar, so the first message isn't hidden under it */

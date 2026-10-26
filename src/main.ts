@@ -1,9 +1,9 @@
-import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath } from "obsidian";
+import { Plugin, MarkdownRenderer, MarkdownRenderChild, TFile, MarkdownView, WorkspaceLeaf, TAbstractFile, Notice, normalizePath, setTooltip } from "obsidian";
 import { Header, Message, ChatNote, ArchiveContext } from "./types";
 import { DEFAULT_SETTINGS, ChatNotesPluginSettings, ChatNotesSettingTab, ChatConfig, getFileOverrides, resolveConfig, OVERRIDE_KEYS } from "./settings";
 import { createElementsHTML, addScrollButtons, createChatInput, addPinButton, addSearchButton, removeChatViewActions, updateReactionBar } from "./ui";
 import { createSearchBar } from "./search-bar";
-import { parseSearchQuery, messageMatches, isFilteredOut, MessageFilter } from "./search";
+import { parseSearchQuery, messageMatches, isFilteredOut, MessageFilter, collectSuggestionValues, SuggestionValues } from "./search";
 import { createFilterExtension } from "./filter-extension";
 import { refreshSticky } from "./sticky";
 import { isChatFile, scrollDocument, extractMessageIdFromSource, parseMessages, renumberMessageIds, getActiveContainers, getEmbedHosts, embedHostOf, getRenderedChatPaths, getReadableTextColor, formatTimestamp, findMessageRows, collectMessageRows, isRowRendered, rowScroller, setHeaderField } from "./util";
@@ -867,9 +867,24 @@ export default class ChatNotesPlugin extends Plugin {
 		this.closeEmojiPicker();
 		if (wasOpenHere) return;
 
+		this.openEmojiPickerAt(anchor, (emoji) => { void this.handleReaction(file, msgId, "add", emoji); });
+	}
+
+	// the search bar's emoji button; the pick is typed into the search field
+	toggleSearchEmojiPicker(anchor: HTMLElement) {
+		const wasOpenHere = this.emojiPicker?.anchor === anchor;
+		// an open message menu goes too, as any click outside it would close it
+		this.closeMenu();
+		if (wasOpenHere) return;
+
+		this.openEmojiPickerAt(anchor, (emoji) => this.getSearchBar().insertAtCaret(emoji));
+	}
+
+	// only one picker is open at a time, whoever opened it
+	private openEmojiPickerAt(anchor: HTMLElement, onPick: (emoji: string) => void) {
 		const picker = openEmojiPicker(
 			anchor,
-			(emoji) => { void this.handleReaction(file, msgId, "add", emoji); },
+			onPick,
 			() => { if (this.emojiPicker === picker) this.emojiPicker = null; }
 		);
 		this.emojiPicker = picker;
@@ -1184,8 +1199,12 @@ export default class ChatNotesPlugin extends Plugin {
 		const bar = this.getSearchBar();
 		const file = view?.file ?? null;
 
-		// what was typed for the file being left still applies to that file
-		if (this.searchFile !== file) bar.flushPending();
+		// what was typed for the file being left still applies to that file, and an emoji
+		// picked after the switch must not land in the next one
+		if (this.searchFile !== file) {
+			bar.flushPending();
+			if (this.emojiPicker && bar.container.contains(this.emojiPicker.anchor)) this.closeEmojiPicker();
+		}
 
 		bar.container.parentElement?.classList.remove("chat-search-open");
 
@@ -1320,12 +1339,26 @@ export default class ChatNotesPlugin extends Plugin {
 		});
 	}
 
+	// the authors and reactions of the searched file, for the search field's suggestions
+	async getSearchSuggestionValues(): Promise<SuggestionValues> {
+		const file = this.searchFile;
+		if (!file) return { authors: [], reactions: [] };
+		const context = await this.getArchiveContext(file);
+		return collectSuggestionValues(Array.from(context.messageMap.values(), entry => entry.message));
+	}
+
 	// "3 of 120" in the bar, counted over the whole file rather than what is mounted
 	private async updateSearchCount(file: TFile) {
 		const bar = this.searchBar;
 		if (!bar) return;
 
 		const query = this.getChatNote(file).searchQuery;
+
+		// before:/after: values that aren't dates are ignored; the warning names them
+		const invalid = query?.invalid ?? [];
+		bar.warning.setCssStyles({ display: invalid.length > 0 ? "flex" : "none" });
+		if (invalid.length > 0) setTooltip(bar.warning, `Not a date, ignored: ${invalid.join(", ")}`);
+
 		if (!query) {
 			bar.count.setText("");
 			return;

@@ -57,7 +57,8 @@ Messages are written and render as Markdown (code blocks included).
 ## Reactions
 
 Select **Add reaction** in a message's action menu to pick an emoji, or type or paste any emoji
-into the picker's text field. Reactions appear as small buttons on the message's bottom edge.
+into the picker's text field. Typing a name there (`fire`, `:fire:`) filters the emoji by their
+Discord names, and `Enter` picks the first match. Reactions appear as small buttons on the bottom of the message.
 Adding the same emoji again increases its count, and selecting a reaction removes one.
 
 Reactions are stored as plain text in the message header, so they can also be written by hand:
@@ -72,11 +73,36 @@ format are ignored, and are removed from the line the next time a reaction is ad
 ## Searching
 
 Select the search icon in the note's header (next to the scroll and pin buttons), or run the
-**Search messages** command, to open a search bar at the top of the chat. Messages that don't
-contain the search text are hidden, the same way **Show pinned messages** hides unpinned ones,
-and the bar shows how many messages match. The search ignores case and looks at the message
-text, the author, the time and the reactions. It runs once you stop typing for a moment, or
-right away when you press `Enter`.
+**Search messages** command, to open a search bar at the top of the chat. This will filter the messages and hide messages that do not match your query. You can search for message content, author, time and reactions (case insensitive).Obsidian's default search with `Ctrl + F` will jump into the message code blocks and breaks formatting, so this is better to use. You can override `Ctrl + F` or set a new hotkey for the command in the seetings.
+
+### Search filters
+
+Like Discord's search, you can narrow the search down with filters: type a filter name, a `:`
+and the value, without a space in between. Filters can be combined with each other and with plain
+search text, and the shown messages match all of them. For example: `author:Alice after:7d hello` shows the messages by Alice from the last 7 days that contain "hello".
+
+| Filter | Shows messages… | Example |
+| --- | --- | --- |
+| `author:` or `from:` | by an author whose name contains the value | `author:Alice` |
+| `content:` or `contains:` | whose text contains the value (the author, time and reactions are not searched) | `content:hello` |
+| `reaction:` | with that reaction, by emoji or by its Discord name | `reaction:👍`, `reaction:fire` |
+| `time:` or `during:` | from that day, month or year, or whose time contains the value | `time:06.08.2026`, `time:08.2026`, `time:14:` |
+| `before:` or `older:` | from before that date | `before:2026` |
+| `after:` or `newer:` | from after that date | `after:06.08.2026`, `after:7d` |
+
+- Put a value with spaces in quotes: `author:"Alice Smith"`, `after:"06.08.2026 14:00"`.
+- Dates are written `DD.MM.YYYY` (`HH:MM` optional), `MM.YYYY`, `YYYY` or `YYYY-MM-DD`. `today`
+  and `yesterday` work too, and so do periods counted back from now: `12h`, `7d`, `2w`, `3m`
+  (months), `1y`. `after:7d` means the last 7 days, `before:7d` anything older.
+- `before:` and `after:` leave out the date they name: `after:06.08.2026` starts on the 7th.
+- Using `author:` more than once shows messages by any of those authors. Every other filter
+  has to match each time it's used.
+- A `before:` or `after:` value that isn't a date is ignored, and a warning icon in the bar
+  says which one. Messages whose time isn't in the plugin's format never match a date filter.
+- While you type, the bar suggests filter names and then the values for them: the note's
+  authors and reactions, and common dates. Pick one with the arrow keys and `Enter`, or click it.
+- The smiley button next to **×** opens the emoji picker and types the emoji you pick at the
+  cursor, handy after `reaction:`.
 
 Close the bar with `Esc` or its **×** button to show all messages again. The search is kept per
 note, so it is still there when you come back to it, and it can be combined with the pinned
@@ -206,6 +232,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the message file form
 
 If you find any **bugs**, please help me fix them by adding an issue on the GitHub page.
 
-I might implement additions like virtualized rendering, Markdown message editing/writing, more search filters and better plugin compatibility in the future.
+I might implement additions like virtualized rendering, Markdown message editing/writing and better plugin compatibility in the future.
 
 > The plugin has not been tested on mobile.

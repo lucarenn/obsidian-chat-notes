@@ -1,4 +1,4 @@
-import { EMOJI_CATEGORIES, QUICK_REACTIONS } from "./emoji-data";
+import { EMOJI_CATEGORIES, QUICK_REACTIONS, emojiByName, emojiName } from "./emoji-data";
 import { isValidReactionToken } from "./reactions";
 
 // gap between the anchor and the picker, and the minimum distance kept from the window edges
@@ -37,11 +37,13 @@ export function openEmojiPicker(
 	const addEmojiButton = (parent: HTMLElement, emoji: string) => {
 		const btn = parent.createEl("button", { cls: "msg-emoji-picker-item", text: emoji });
 		btn.type = "button";
-		btn.setAttribute("aria-label", emoji);
+		const name = emojiName(emoji);
+		btn.setAttribute("aria-label", name !== undefined ? `:${name}:` : emoji);
 		btn.addEventListener("click", (e) => {
 			e.stopPropagation();
 			pick(emoji);
 		});
+		return btn;
 	};
 
 	const quickRow = picker.createDiv("msg-emoji-picker-quick");
@@ -49,25 +51,62 @@ export function openEmojiPicker(
 
 	const input = picker.createEl("input", { cls: "msg-emoji-picker-input" });
 	input.type = "text";
-	input.placeholder = "Type or paste an emoji";
+	input.placeholder = "Search, or type or paste an emoji";
 	input.setAttribute("aria-label", "Custom reaction");
 
-	input.addEventListener("input", () => input.classList.remove("is-invalid"));
+	// each category's heading, items and named buttons, for the filter below
+	type GridItem = { btn: HTMLElement; name: string };
+	const sections: { heading: HTMLElement; items: HTMLElement; buttons: GridItem[] }[] = [];
+
+	const grid = picker.createDiv("msg-emoji-picker-grid");
+	for (const category of EMOJI_CATEGORIES) {
+		const heading = grid.createDiv({ cls: "msg-emoji-picker-category", text: category.name });
+		const items = grid.createDiv("msg-emoji-picker-items");
+		const buttons = category.emoji.map(([emoji, name]) => ({ btn: addEmojiButton(items, emoji), name }));
+		sections.push({ heading, items, buttons });
+	}
+	const gridItems = sections.flatMap(section => section.buttons);
+
+	// a name being typed ("fir", ":fire"), as opposed to a pasted emoji or custom token
+	const typedName = () => /^:?[\w+-]+:?$/.test(input.value.trim())
+		? input.value.trim().toLowerCase().replace(/^:|:$/g, "")
+		: "";
+
+	// shows only the emoji whose name contains what is typed; the quick row hides meanwhile
+	const applyFilter = () => {
+		const query = typedName();
+		quickRow.toggle(query === "");
+		for (const { heading, items, buttons } of sections) {
+			let any = false;
+			for (const { btn, name } of buttons) {
+				const match = name.includes(query);
+				btn.toggle(match);
+				any ||= match;
+			}
+			heading.toggle(any);
+			items.toggle(any);
+		}
+	};
+
+	input.addEventListener("input", () => {
+		input.classList.remove("is-invalid");
+		applyFilter();
+	});
+	/* Enter takes an exact name first (fire, :fire:), then the first emoji the filter left, and
+	   otherwise the text itself, so pasted emoji and custom tokens still work. */
 	input.addEventListener("keydown", (e) => {
 		if (e.key !== "Enter") return;
 		e.preventDefault();
 
 		const value = input.value.trim();
-		if (isValidReactionToken(value)) pick(value);
+		const query = typedName();
+		const first = query === "" ? undefined : gridItems.find(item => item.name.includes(query));
+		const emoji = emojiByName(value) ?? (first ? emojiByName(first.name) : undefined);
+
+		if (emoji !== undefined) pick(emoji);
+		else if (isValidReactionToken(value)) pick(value);
 		else input.classList.add("is-invalid");
 	});
-
-	const grid = picker.createDiv("msg-emoji-picker-grid");
-	for (const category of EMOJI_CATEGORIES) {
-		grid.createDiv({ cls: "msg-emoji-picker-category", text: category.name });
-		const items = grid.createDiv("msg-emoji-picker-items");
-		for (const emoji of category.emoji) addEmojiButton(items, emoji);
-	}
 
 	// clicks inside must not reach the document handler that closes the action menu
 	picker.addEventListener("click", (e) => e.stopPropagation());
