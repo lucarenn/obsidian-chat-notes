@@ -1,7 +1,7 @@
 {
 	"id": "chat-notes",
 	"name": "Chat Notes",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"minAppVersion": "1.5.11",
 	"description": "Write messages, chats and conversations inside your notes.",
 	"author": "Luca Renner",
